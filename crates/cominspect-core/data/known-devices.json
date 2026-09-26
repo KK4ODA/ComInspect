@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 1,
+  "name": "ComInspect built-in device hints",
+  "updated": "2026-09-26",
+  "notes": "Hints are suggestions shown to the user. They never change a device's purpose or CAT status automatically. Entries only claim what the USB IDs or strings reliably establish.",
+  "entries": [
+    {
+      "id": "icom-cp210x-serial",
+      "match": { "vid": "10C4", "pid": "EA60", "serialPrefix": "IC-" },
+      "title": "Icom {serialModel}",
+      "detail": "The USB serial string identifies this port as belonging to an Icom {serialModel}. Icom radios use a USB serial port for CI-V (CAT) control. Models with two USB serial ports assign a different function to each, so check the manual before marking this one as CAT.",
+      "shortLabel": "Icom {serialModel}",
+      "equipment": "Icom {serialModel}",
+      "category": "radio_cat"
+    },
+    {
+      "id": "silabs-cp2105-enhanced",
+      "match": { "vid": "10C4", "pid": "EA70", "interface": 0 },
+      "chip": "Silicon Labs CP2105 dual UART",
+      "title": "CP2105 Enhanced COM port (interface 0)",
+      "detail": "Interface 0 of a CP2105 is its Enhanced COM port. Yaesu radios with a built-in CP2105 (for example FT-991/FT-991A, FTDX10 and the FTDX101 series) document the Enhanced port for CAT control. Verify against your radio's manual, then mark the port as Verified CAT.",
+      "shortLabel": "Enhanced COM port",
+      "purpose": "cat"
+    },
+    {
+      "id": "silabs-cp2105-standard",
+      "match": { "vid": "10C4", "pid": "EA70", "interface": 1 },
+      "chip": "Silicon Labs CP2105 dual UART",
+      "title": "CP2105 Standard COM port (interface 1)",
+      "detail": "Interface 1 of a CP2105 is its Standard COM port. On Yaesu radios with a built-in CP2105 it is normally used for transmit control through RTS/DTR (PTT, CW and FSK keying) rather than for CAT commands.",
+      "shortLabel": "Standard COM port",
+      "purpose": "ptt"
+    },
+    {
+      "id": "silabs-cp2105",
+      "match": { "vid": "10C4", "pid": "EA70" },
+      "chip": "Silicon Labs CP2105 dual UART",
+      "title": "Silicon Labs CP2105 dual USB-UART bridge",
+      "detail": "Provides two serial ports: interface 0 (Enhanced) and interface 1 (Standard). Radios often use one for CAT and the other for keying."
+    },
+    {
+      "id": "silabs-cp2108",
+      "match": { "vid": "10C4", "pid": "EA71" },
+      "chip": "Silicon Labs CP2108 quad UART",
+      "title": "Silicon Labs CP2108 quad USB-UART bridge",
+      "detail": "Provides four serial ports, one per USB interface (0 to 3)."
+    },
+    {
+      "id": "silabs-cp210x",
+      "match": { "vid": "10C4", "pid": "EA60" },
+      "chip": "Silicon Labs CP210x",
+      "title": "Silicon Labs CP210x USB-UART bridge",
+      "detail": "Used by many radios, interfaces and cables (CP2102, CP2102N, CP2104). Older CP2102 chips often keep the default serial number 0001, in which case identical devices can only be told apart by the USB socket they are plugged into."
+    },
+    {
+      "id": "ftdi-ft232r",
+      "match": { "vid": "0403", "pid": "6001" },
+      "chip": "FTDI FT232R",
+      "title": "FTDI FT232R USB-UART bridge",
+      "detail": "Common in CAT, CI-V and programming cables. Genuine chips carry a factory-programmed unique serial number, so the cable is recognized in any USB socket. Counterfeit chips often share the serial A50285BI."
+    },
+    {
+      "id": "ftdi-ft2232-a",
+      "match": { "vid": "0403", "pid": "6010", "interface": 0 },
+      "chip": "FTDI FT2232 dual UART",
+      "title": "FTDI FT2232 channel A",
+      "shortLabel": "Channel A"
+    },
+    {
+      "id": "ftdi-ft2232-b",
+      "match": { "vid": "0403", "pid": "6010", "interface": 1 },
+      "chip": "FTDI FT2232 dual UART",
+      "title": "FTDI FT2232 channel B",
+      "shortLabel": "Channel B"
+    },
+    {
+      "id": "ftdi-ft2232",
+      "match": { "vid": "0403", "pid": "6010" },
+      "chip": "FTDI FT2232 dual UART",
+      "title": "FTDI FT2232 dual USB-UART bridge",
+      "detail": "Each channel (A, B) is a separate serial port with its own function."
+    },
+    {
+      "id": "ftdi-ft4232",
+      "match": { "vid": "0403", "pid": "6011" },
+      "chip": "FTDI FT4232H quad UART",
+      "title": "FTDI FT4232H quad USB-UART bridge",
+      "detail": "Each channel (A to D) is a separate serial port."
+    },
+    {
+      "id": "ftdi-ft232h",
+      "match": { "vid": "0403", "pid": "6014" },
+      "chip": "FTDI FT232H",
+      "title": "FTDI FT232H USB-UART bridge"
+    },
+    {
+      "id": "ftdi-ftx",
+      "match": { "vid": "0403", "pid": "6015" },
+      "chip": "FTDI FT-X series",
+      "title": "FTDI FT-X USB-UART bridge (FT230X/FT231X/FT234XD)"
+    },
+    {
+      "id": "prolific-pl2303",
+      "match": { "vid": "067B", "pid": "2303" },
+      "chip": "Prolific PL2303",
+      "title": "Prolific PL2303 USB-serial bridge",
+      "detail": "Very common in inexpensive radio programming cables. Current Prolific drivers refuse counterfeit and discontinued PL2303 variants (Device Manager Code 10). These cables usually report no serial number, so they are recognized by the USB socket they are plugged into.",
+      "caution": true
+    },
+    {
+      "id": "wch-ch340",
+      "match": { "vid": "1A86", "pid": "7523" },
+      "chip": "WCH CH340/CH341",
+      "title": "WCH CH340 USB-serial bridge",
+      "detail": "Found in many low-cost cables and boards. The CH340 has no serial number, so identical cables can only be told apart by USB socket. Drivers are available from WCH and through Windows Update."
+    },
+    {
+      "id": "wch-ch9102",
+      "match": { "vid": "1A86", "pid": "55D4" },
+      "chip": "WCH CH9102",
+      "title": "WCH CH9102 USB-serial bridge"
+    },
+    {
+      "id": "ublox-6",
+      "match": { "vid": "1546", "pid": "01A6" },
+      "title": "u-blox 6 GPS receiver",
+      "detail": "Streams NMEA position and time data, useful for station clock synchronization and grid-square location.",
+      "purpose": "gps",
+      "category": "gps"
+    },
+    {
+      "id": "ublox-7",
+      "match": { "vid": "1546", "pid": "01A7" },
+      "title": "u-blox 7 GNSS receiver",
+      "detail": "Streams NMEA position and time data, useful for station clock synchronization and grid-square location.",
+      "purpose": "gps",
+      "category": "gps"
+    },
+    {
+      "id": "ublox-8",
+      "match": { "vid": "1546", "pid": "01A8" },
+      "title": "u-blox M8 GNSS receiver",
+      "detail": "Streams NMEA position and time data, useful for station clock synchronization and grid-square location.",
+      "purpose": "gps",
+      "category": "gps"
+    },
+    {
+      "id": "ublox-generic-gnss",
+      "match": { "vid": "1546", "pid": "01A9" },
+      "title": "u-blox GNSS receiver",
+      "purpose": "gps",
+      "category": "gps"
+    },
+    {
+      "id": "ublox",
+      "match": { "vid": "1546" },
+      "title": "u-blox device"
+    },
+    {
+      "id": "arduino",
+      "match": { "vid": "2341" },
+      "title": "Arduino board",
+      "detail": "Opening this port normally resets the board through the DTR line. Arduino boards are common in homebrew keyers, antenna switches and rotator controllers."
+    },
+    {
+      "id": "arduino-org",
+      "match": { "vid": "2A03" },
+      "title": "Arduino board",
+      "detail": "Opening this port normally resets the board through the DTR line."
+    },
+    {
+      "id": "stm32-vcp",
+      "match": { "vid": "0483", "pid": "5740" },
+      "title": "STMicroelectronics STM32 virtual COM port",
+      "detail": "USB CDC serial port implemented in STM32 firmware, used by many SDRs, antenna analyzers and homebrew controllers."
+    },
+    {
+      "id": "raspberry-pi-rp2",
+      "match": { "vid": "2E8A" },
+      "title": "Raspberry Pi RP2040/RP2350 USB serial",
+      "detail": "USB CDC serial port of a Raspberry Pi Pico or similar board."
+    },
+    {
+      "id": "microchip-mcp2221",
+      "match": { "vid": "04D8", "pid": "00DD" },
+      "chip": "Microchip MCP2221",
+      "title": "Microchip MCP2221 USB-UART/I2C bridge"
+    },
+    {
+      "id": "microchip-cdc",
+      "match": { "vid": "04D8", "pid": "000A" },
+      "title": "Microchip CDC serial port (PIC firmware)"
+    },
+    {
+      "id": "intel-amt-sol",
+      "match": { "descriptionContains": "Active Management Technology" },
+      "title": "Intel AMT Serial-over-LAN port",
+      "detail": "A remote-management port provided by the computer's Intel ME firmware. It has no physical connector and is not useful for radio equipment; you can safely ignore it.",
+      "shortLabel": "Intel AMT SOL (no connector)",
+      "category": "other"
+    },
+    {
+      "id": "macos-bluetooth-incoming",
+      "match": { "nameContains": "Bluetooth-Incoming-Port" },
+      "title": "macOS Bluetooth serial server port",
+      "detail": "Created by macOS for incoming Bluetooth serial connections. Most radio software does not use it.",
+      "category": "bluetooth_serial"
+    },
+    {
+      "id": "bluetooth-spp",
+      "match": { "transport": "bluetooth" },
+      "title": "Bluetooth serial port (SPP)",
+      "detail": "Outgoing ports connect to the paired device when an application opens them; incoming ports wait for a remote device to connect. Bluetooth TNCs and CAT adapters use outgoing ports.",
+      "category": "bluetooth_serial"
+    },
+    {
+      "id": "com0com",
+      "match": { "virtualProvider": "com0com" },
+      "title": "com0com null-modem pair",
+      "detail": "Data written to one port of a com0com pair comes out of the other. Often used to share a radio between programs or to connect a soundcard modem to a KISS client.",
+      "category": "virtual_serial"
+    },
+    {
+      "id": "vspe",
+      "match": { "virtualProvider": "VSPE" },
+      "title": "Eterlogic VSPE virtual port",
+      "detail": "Created by the Virtual Serial Ports Emulator (VSPE). If this port is missing, check that VSPE is running with your saved configuration.",
+      "category": "virtual_serial"
+    },
+    {
+      "id": "linux-cdc-acm-modemmanager",
+      "match": { "platform": "linux", "driver": "cdc_acm" },
+      "title": "ModemManager may probe this port",
+      "detail": "On many Linux distributions ModemManager sends AT commands to newly connected ttyACM ports, which can confuse radios, TNCs and microcontroller boards. If the device misbehaves right after being plugged in, disable ModemManager or add a udev rule setting ENV{ID_MM_DEVICE_IGNORE}=\"1\" for it.",
+      "caution": true
+    },
+    {
+      "id": "builtin-uart",
+      "match": { "transport": "builtin" },
+      "title": "Built-in serial port",
+      "detail": "A serial port on the motherboard or SoC. On PCs this is usually an RS-232 header or DB-9 connector; many older radio interfaces and rotator controllers connect here. If nothing is connected, you can ignore it."
+    }
+  ]
+}

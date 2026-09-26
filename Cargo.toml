@@ -1,0 +1,47 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/cominspect-core",
+    "crates/cominspect-store",
+    "crates/cominspect-platform",
+    "crates/cominspect-cli",
+    "src-tauri",
+]
+# `cargo test` / `cargo build` at the workspace root skip the GUI crate so the
+# libraries and CLI can be built without WebView system dependencies.
+default-members = [
+    "crates/cominspect-core",
+    "crates/cominspect-store",
+    "crates/cominspect-platform",
+    "crates/cominspect-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["KK4ODA"]
+repository = "https://github.com/KK4ODA/ComInspect"
+publish = false
+
+[workspace.dependencies]
+cominspect-core = { path = "crates/cominspect-core" }
+cominspect-store = { path = "crates/cominspect-store" }
+cominspect-platform = { path = "crates/cominspect-platform" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+log = "0.4"
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+libc = "0.2"
+serialport = { version = "4.10", default-features = false }
+tempfile = "3"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "unwind"
+strip = true
