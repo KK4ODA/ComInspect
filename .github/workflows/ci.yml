@@ -27,9 +27,14 @@ jobs:
         os: [ubuntu-22.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v5
+      - name: Rust version (from rust-toolchain.toml)
+        id: rust
+        shell: bash
+        run: echo "version=$(grep -m1 '^channel' rust-toolchain.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.rust.outputs.version }}
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Formatting
@@ -38,17 +43,21 @@ jobs:
       - name: Clippy (libraries and CLI)
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Unit tests
+        if: ${{ !cancelled() }}
         run: cargo test --locked
       # Exercise the real OS enumeration code (SetupAPI/CfgMgr32, IOKit, sysfs)
       # on each runner.
       - name: Smoke test - list serial ports
+        if: ${{ !cancelled() }}
         run: cargo run --locked -q -p cominspect-cli -- list
       - name: Smoke test - JSON output is valid
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           cargo run --locked -q -p cominspect-cli -- list --json > scan.json
           node -e "const s=require('./scan.json'); if(!s.platform||!Array.isArray(s.ports)) process.exit(1); console.log(s.platform, s.ports.length, 'ports,', s.durationMs, 'ms')"
       - name: Smoke test - database create and reopen
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           cargo run --locked -q -p cominspect-cli -- inventory --db ci-test/inventory.db
@@ -59,8 +68,8 @@ jobs:
     name: Frontend
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -77,14 +86,19 @@ jobs:
         os: [ubuntu-22.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust version (from rust-toolchain.toml)
+        id: rust
+        shell: bash
+        run: echo "version=$(grep -m1 '^channel' rust-toolchain.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
         with:
-          components: clippy
+          toolchain: ${{ steps.rust.outputs.version }}
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Linux build dependencies
         if: runner.os == 'Linux'
@@ -96,6 +110,8 @@ jobs:
       - name: Clippy (app)
         run: cargo clippy -p cominspect --all-targets --locked -- -D warnings
       - name: Tests (app)
+        if: ${{ !cancelled() }}
         run: cargo test -p cominspect --locked
       - name: Build
+        if: ${{ !cancelled() }}
         run: cargo build -p cominspect --locked

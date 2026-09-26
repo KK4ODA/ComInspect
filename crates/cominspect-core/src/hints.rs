@@ -267,7 +267,7 @@ impl KnownDeviceDb {
             .iter()
             .filter(|c| Self::matches(c, port, platform))
             .collect();
-        matched.sort_by(|a, b| b.specificity.cmp(&a.specificity));
+        matched.sort_by_key(|c| std::cmp::Reverse(c.specificity));
 
         matched
             .into_iter()

@@ -77,10 +77,8 @@ fn multi_sz(buf: &[u16]) -> Vec<String> {
 }
 
 fn u16_units(bytes: &[u8]) -> Vec<u16> {
-    bytes
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
-        .collect()
+    let (pairs, _) = bytes.as_chunks::<2>();
+    pairs.iter().map(|&pair| u16::from_le_bytes(pair)).collect()
 }
 
 fn format_guid(b: &[u8]) -> Option<String> {

@@ -1,0 +1,8 @@
+# The Rust version used for development, CI and release builds. Pinned so a
+# new Rust release (and its new clippy lints) cannot break the build on its
+# own; bump it deliberately in a separate commit. The workflows read the
+# version from this file.
+[toolchain]
+channel = "1.98"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

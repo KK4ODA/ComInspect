@@ -139,12 +139,12 @@ impl UserIdentity {
         }
         match (&mut self.notes, &other.notes) {
             (None, Some(n)) => self.notes = Some(n.clone()),
-            (Some(mine), Some(theirs)) if mine.trim() != theirs.trim() => {
-                // Keep both notes rather than silently dropping one.
-                if !mine.contains(theirs.trim()) {
-                    mine.push_str("\n\n");
-                    mine.push_str(theirs.trim());
-                }
+            // Keep both notes rather than silently dropping one.
+            (Some(mine), Some(theirs))
+                if mine.trim() != theirs.trim() && !mine.contains(theirs.trim()) =>
+            {
+                mine.push_str("\n\n");
+                mine.push_str(theirs.trim());
             }
             _ => {}
         }
