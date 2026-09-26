@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  core:
+    name: Core & platform (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Formatting
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+      - name: Clippy (libraries and CLI)
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Unit tests
+        run: cargo test --locked
+      # Exercise the real OS enumeration code (SetupAPI/CfgMgr32, IOKit, sysfs)
+      # on each runner.
+      - name: Smoke test - list serial ports
+        run: cargo run --locked -q -p cominspect-cli -- list
+      - name: Smoke test - JSON output is valid
+        shell: bash
+        run: |
+          cargo run --locked -q -p cominspect-cli -- list --json > scan.json
+          node -e "const s=require('./scan.json'); if(!s.platform||!Array.isArray(s.ports)) process.exit(1); console.log(s.platform, s.ports.length, 'ports,', s.durationMs, 'ms')"
+      - name: Smoke test - database create and reopen
+        shell: bash
+        run: |
+          cargo run --locked -q -p cominspect-cli -- inventory --db ci-test/inventory.db
+          cargo run --locked -q -p cominspect-cli -- inventory --db ci-test/inventory.db --json > view.json
+          node -e "const v=require('./view.json'); console.log(v.summary)"
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
+  app:
+    name: Desktop app (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+      - run: npm ci
+      - run: npm run build
+      - name: Clippy (app)
+        run: cargo clippy -p cominspect --all-targets --locked -- -D warnings
+      - name: Tests (app)
+        run: cargo test -p cominspect --locked
+      - name: Build
+        run: cargo build -p cominspect --locked

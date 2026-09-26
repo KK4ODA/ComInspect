@@ -99,6 +99,10 @@ pub struct OpenTestReport {
 pub struct CatQueryReport {
     pub port: String,
     pub outcome: OpenOutcome,
+    /// Baud rate of the reply (or the last rate tried).
+    pub baud_rate: u32,
+    /// Rates tried when automatic detection was used.
+    pub tried_rates: Vec<u32>,
     pub sent_hex: String,
     pub received_hex: String,
     pub received_text: String,
@@ -295,46 +299,16 @@ pub fn open_test(port: &str) -> OpenTestReport {
     }
 }
 
-/// Sends one read-only CAT probe and reports the raw reply.
-pub fn cat_query(
-    port: &str,
-    settings: &SerialSettings,
+/// Sends the probe once on an open port and collects the reply.
+fn exchange(
+    handle: &mut Box<dyn SerialPort>,
     protocol: CatProtocol,
-    civ_address: u8,
+    sent: &[u8],
     timeout: Duration,
-) -> CatQueryReport {
-    let started = Instant::now();
-    let sent = cat::request_bytes(protocol, civ_address);
-    let report = |outcome, received: &[u8], recognized, summary: String| CatQueryReport {
-        port: port.to_string(),
-        outcome,
-        sent_hex: hex(&sent),
-        received_hex: hex(received),
-        received_text: printable(received),
-        recognized,
-        summary,
-        elapsed_ms: started.elapsed().as_millis() as u64,
-    };
-    let timeout = timeout.clamp(Duration::from_millis(200), Duration::from_secs(5));
-    if let Some(message) = in_use_message(port) {
-        return report(OpenOutcome::InUse, &[], false, message);
-    }
-    let mut handle = match open_port(port, settings, Duration::from_millis(50)) {
-        Ok(h) => h,
-        Err(e) => {
-            let (outcome, message) = classify_error(&e);
-            return report(outcome, &[], false, message);
-        }
-    };
+) -> std::io::Result<Vec<u8>> {
     let _ = handle.clear(serialport::ClearBuffer::All);
-    if let Err(e) = handle.write_all(&sent).and_then(|_| handle.flush()) {
-        return report(
-            OpenOutcome::Error,
-            &[],
-            false,
-            format!("Writing to the port failed: {e}"),
-        );
-    }
+    handle.write_all(sent)?;
+    handle.flush()?;
     let deadline = Instant::now() + timeout;
     let mut received = Vec::new();
     let mut buf = [0u8; 256];
@@ -343,7 +317,7 @@ pub fn cat_query(
             Ok(0) => {}
             Ok(n) => {
                 received.extend_from_slice(&buf[..n]);
-                if cat::response_complete(protocol, &received, &sent) {
+                if cat::response_complete(protocol, &received, sent) {
                     // Allow trailing bytes of the same reply to arrive.
                     thread::sleep(Duration::from_millis(30));
                     if let Ok(n) = handle.read(&mut buf) {
@@ -353,23 +327,116 @@ pub fn cat_query(
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(received)
+}
+
+/// Sends one read-only CAT probe and reports the raw reply.
+///
+/// A `baud_rate` of 0 selects automatic detection: the port is opened once
+/// and the probe is repeated at common rates until a valid reply arrives.
+pub fn cat_query(
+    port: &str,
+    settings: &SerialSettings,
+    protocol: CatProtocol,
+    civ_address: u8,
+    timeout: Duration,
+) -> CatQueryReport {
+    let started = Instant::now();
+    let sent = cat::request_bytes(protocol, civ_address);
+    let auto = settings.baud_rate == 0;
+    let rates: Vec<u32> = if auto {
+        cat::auto_baud_rates(protocol).to_vec()
+    } else {
+        vec![settings.baud_rate]
+    };
+    let mut tried: Vec<u32> = Vec::new();
+    let report =
+        |outcome, baud_rate: u32, tried: &[u32], received: &[u8], recognized, summary: String| {
+            CatQueryReport {
+                port: port.to_string(),
+                outcome,
+                baud_rate,
+                tried_rates: tried.to_vec(),
+                sent_hex: hex(&sent),
+                received_hex: hex(received),
+                received_text: printable(received),
+                recognized,
+                summary,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+            }
+        };
+    let timeout = if auto {
+        Duration::from_millis(450)
+    } else {
+        timeout.clamp(Duration::from_millis(200), Duration::from_secs(5))
+    };
+    if let Some(message) = in_use_message(port) {
+        return report(OpenOutcome::InUse, rates[0], &tried, &[], false, message);
+    }
+    let first = SerialSettings {
+        baud_rate: rates[0],
+        ..settings.clone()
+    };
+    let mut handle = match open_port(port, &first, Duration::from_millis(50)) {
+        Ok(h) => h,
+        Err(e) => {
+            let (outcome, message) = classify_error(&e);
+            return report(outcome, rates[0], &tried, &[], false, message);
+        }
+    };
+
+    let mut last_received = Vec::new();
+    for &rate in &rates {
+        if rate != rates[0] && handle.set_baud_rate(rate).is_err() {
+            continue;
+        }
+        tried.push(rate);
+        let received = match exchange(&mut handle, protocol, &sent, timeout) {
+            Ok(r) => r,
             Err(e) => {
                 return report(
                     OpenOutcome::Error,
-                    &received,
+                    rate,
+                    &tried,
+                    &last_received,
                     false,
-                    format!("Reading from the port failed: {e}"),
+                    format!("Communication with the port failed: {e}"),
                 );
             }
+        };
+        let interpretation = cat::interpret_response(protocol, &received, &sent);
+        if interpretation.recognized {
+            drop(handle);
+            let summary = if auto {
+                format!("{} Detected at {rate} baud.", interpretation.summary)
+            } else {
+                interpretation.summary
+            };
+            return report(OpenOutcome::Opened, rate, &tried, &received, true, summary);
         }
+        last_received = received;
     }
     drop(handle);
-    let interpretation = cat::interpret_response(protocol, &received, &sent);
+    let last_rate = *tried.last().unwrap_or(&rates[0]);
+    let summary = if auto {
+        let list: Vec<String> = tried.iter().map(|r| r.to_string()).collect();
+        format!(
+            "No valid reply at any common baud rate (tried {}). Check that this is the CAT port and that CAT is enabled on the radio.",
+            list.join(", ")
+        )
+    } else {
+        cat::interpret_response(protocol, &last_received, &sent).summary
+    };
     report(
         OpenOutcome::Opened,
-        &received,
-        interpretation.recognized,
-        interpretation.summary,
+        last_rate,
+        &tried,
+        &last_received,
+        false,
+        summary,
     )
 }
 

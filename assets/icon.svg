@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e40af"/>
+      <stop offset="1" stop-color="#0b1f4d"/>
+    </linearGradient>
+    <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dbe4f3"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="216" fill="url(#bg)"/>
+  <!-- D-sub shell -->
+  <path d="M170 332 Q170 292 210 292 L814 292 Q854 292 848 332 L786 700 Q780 736 744 736 L280 736 Q244 736 238 700 Z" fill="url(#shell)"/>
+  <!-- pin field -->
+  <path d="M252 364 L772 364 L722 664 L302 664 Z" fill="#0f2a6b" stroke="#0f2a6b" stroke-width="36" stroke-linejoin="round"/>
+  <g fill="#fbbf24">
+    <circle cx="322" cy="452" r="40"/>
+    <circle cx="417" cy="452" r="40"/>
+    <circle cx="512" cy="452" r="40"/>
+    <circle cx="607" cy="452" r="40"/>
+    <circle cx="702" cy="452" r="40"/>
+    <circle cx="369" cy="572" r="40"/>
+    <circle cx="464" cy="572" r="40"/>
+    <circle cx="559" cy="572" r="40"/>
+    <circle cx="654" cy="572" r="40"/>
+  </g>
+</svg>

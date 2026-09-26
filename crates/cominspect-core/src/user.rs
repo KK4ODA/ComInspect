@@ -47,6 +47,9 @@ labelled_enum! {
         Data => ("data", "Data"),
         Kiss => ("kiss", "KISS"),
         Gps => ("gps", "GPS"),
+        /// Rotators, amplifiers, tuners, antenna switches and similar.
+        Control => ("control", "Control"),
+        Other => ("other", "Other"),
         Unknown => ("unknown", "Unknown"),
     }
 }
@@ -63,7 +66,10 @@ labelled_enum! {
         Rotator => ("rotator", "Rotator"),
         Amplifier => ("amplifier", "Amplifier"),
         AntennaTuner => ("antenna_tuner", "Antenna tuner"),
+        AntennaSwitch => ("antenna_switch", "Antenna switch"),
         ProgrammingCable => ("programming_cable", "Programming cable"),
+        /// Sound-card/radio interfaces with serial control (PTT, CAT pass-through).
+        RadioInterface => ("radio_interface", "Radio interface"),
         BluetoothSerial => ("bluetooth_serial", "Bluetooth serial"),
         VirtualSerial => ("virtual_serial", "Virtual serial"),
         GenericSerial => ("generic_serial", "Generic serial"),

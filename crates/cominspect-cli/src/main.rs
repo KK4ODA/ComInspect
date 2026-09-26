@@ -28,7 +28,7 @@ COMMANDS:
     export [--db PATH] --out FILE Export nicknames and identities to a JSON file
     db-path                       Print the default database location
     test-open PORT                Check whether PORT can be opened (may toggle DTR/RTS!)
-    cat PORT --protocol P [--baud N] [--stop-bits 1|2] [--civ HEX]
+    cat PORT --protocol P [--baud N|auto] [--stop-bits 1|2] [--civ HEX]
                                   Send one read-only CAT query. P is one of:
                                   kenwood-id, kenwood-frequency, icom-id, icom-frequency,
                                   yaesu-legacy-frequency
@@ -313,10 +313,10 @@ fn cmd_cat(args: &[String]) -> Result<(), String> {
         .iter()
         .find(|p| p.protocol == protocol)
         .expect("probe metadata");
-    let baud = option(args, "--baud")
-        .map(|b| b.parse::<u32>().map_err(|_| "invalid --baud"))
-        .transpose()?
-        .unwrap_or(info.default_baud);
+    let baud = match option(args, "--baud").as_deref() {
+        None | Some("auto") => 0,
+        Some(b) => b.parse::<u32>().map_err(|_| "invalid --baud")?,
+    };
     let stop_bits = option(args, "--stop-bits")
         .map(|b| b.parse::<u8>().map_err(|_| "invalid --stop-bits"))
         .transpose()?

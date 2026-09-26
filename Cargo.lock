@@ -526,6 +526,7 @@ dependencies = [
  "cominspect-core",
  "cominspect-platform",
  "cominspect-store",
+ "libc",
  "log",
  "serde",
  "serde_json",
@@ -538,7 +539,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "thiserror 2.0.21",
- "time",
+ "tokio",
 ]
 
 [[package]]

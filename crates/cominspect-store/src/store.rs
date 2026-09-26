@@ -206,7 +206,9 @@ impl Store {
         })
     }
 
-    fn open_temporary(app_version: &str, reason: String) -> Result<Store> {
+    /// In-memory database used when the file cannot be used. `reason` is
+    /// shown to the user.
+    pub fn open_temporary(app_version: &str, reason: String) -> Result<Store> {
         let mut conn = Connection::open_in_memory()?;
         conn.pragma_update(None, "foreign_keys", true)?;
         schema::migrate(&mut conn, app_version)?;

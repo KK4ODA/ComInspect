@@ -32,40 +32,53 @@ pub struct CatProbeInfo {
 pub const PROBES: &[CatProbeInfo] = &[
     CatProbeInfo {
         protocol: CatProtocol::KenwoodId,
-        label: "Kenwood / Yaesu / Elecraft: read radio ID (ID;)",
-        description: "Asks the radio for its model ID. Works with Kenwood, Elecraft and current Yaesu radios.",
-        default_baud: 38400,
+        label: "ASCII CAT: read radio ID (ID;)",
+        description: "Kenwood-style text CAT, used by Kenwood, Elecraft, current Yaesu radios, FlexRadio, QRP Labs, (tr)uSDX, Lab599 and many others.",
+        default_baud: 0,
         default_stop_bits: 1,
     },
     CatProbeInfo {
         protocol: CatProtocol::KenwoodFrequency,
-        label: "Kenwood / Yaesu / Elecraft: read VFO A frequency (FA;)",
-        description: "Asks the radio for the VFO A frequency.",
-        default_baud: 38400,
+        label: "ASCII CAT: read VFO A frequency (FA;)",
+        description: "Kenwood-style text CAT frequency query.",
+        default_baud: 0,
         default_stop_bits: 1,
     },
     CatProbeInfo {
         protocol: CatProtocol::IcomId,
-        label: "Icom CI-V: read transceiver ID",
-        description: "Sends the CI-V 'read transceiver ID' command to the selected CI-V address.",
-        default_baud: 19200,
+        label: "CI-V: read transceiver ID",
+        description: "Icom CI-V protocol, also used by Xiegu and other CI-V compatible radios.",
+        default_baud: 0,
         default_stop_bits: 1,
     },
     CatProbeInfo {
         protocol: CatProtocol::IcomFrequency,
-        label: "Icom CI-V: read operating frequency",
-        description: "Sends the CI-V 'read operating frequency' command to the selected CI-V address.",
-        default_baud: 19200,
+        label: "CI-V: read operating frequency",
+        description: "Icom CI-V frequency query.",
+        default_baud: 0,
         default_stop_bits: 1,
     },
     CatProbeInfo {
         protocol: CatProtocol::YaesuLegacyFrequency,
-        label: "Yaesu FT-817/857/897: read frequency and mode",
-        description: "Legacy 5-byte Yaesu CAT 'read frequency and mode' command.",
-        default_baud: 4800,
+        label: "Legacy Yaesu 5-byte CAT: read frequency and mode",
+        description: "Binary CAT of older Yaesu radios such as the FT-817/818, FT-857 and FT-897.",
+        default_baud: 0,
         default_stop_bits: 2,
     },
 ];
+
+/// Baud rates tried, in order, when the user selects automatic detection.
+pub fn auto_baud_rates(protocol: CatProtocol) -> &'static [u32] {
+    match protocol {
+        CatProtocol::YaesuLegacyFrequency => &[4800, 9600, 38400],
+        CatProtocol::IcomId | CatProtocol::IcomFrequency => {
+            &[19200, 9600, 115200, 38400, 57600, 4800]
+        }
+        CatProtocol::KenwoodId | CatProtocol::KenwoodFrequency => {
+            &[38400, 9600, 4800, 19200, 57600, 115200]
+        }
+    }
+}
 
 /// Controller address used in CI-V frames sent by the computer.
 const CIV_CONTROLLER: u8 = 0xE0;
@@ -99,7 +112,9 @@ pub struct CatInterpretation {
     pub summary: String,
 }
 
-fn yaesu_model(id: &str) -> Option<&'static str> {
+/// Model registered for an ASCII CAT `ID` reply. Only a selection is listed;
+/// unknown IDs are still reported.
+fn model_for_id(id: &str) -> Option<&'static str> {
     Some(match id {
         "0310" => "Yaesu FT-950",
         "0251" => "Yaesu FT-2000",
@@ -220,9 +235,13 @@ pub fn interpret_response(
                     .take_while(|c| c.is_ascii_digit())
                     .collect();
                 if !id.is_empty() && reply[2 + id.len()..].starts_with(';') {
-                    let model = yaesu_model(&id)
-                        .map(|m| format!(" — typically {m}"))
-                        .unwrap_or_default();
+                    // IDs 019 (TS-2000) and 020 (TS-480) are emulated by many
+                    // radios and CAT programs.
+                    let model = match (model_for_id(&id), id.as_str()) {
+                        (Some(m), "019" | "020") => format!(" ({m} or a radio emulating it)"),
+                        (Some(m), _) => format!(" (listed as {m})"),
+                        (None, _) => String::new(),
+                    };
                     return CatInterpretation {
                         recognized: true,
                         summary: format!("Radio answered with ID {id}{model}."),
@@ -353,7 +372,14 @@ mod tests {
         assert_eq!(sent, b"ID;");
         let r = interpret_response(CatProtocol::KenwoodId, b"ID0761;", &sent);
         assert!(r.recognized);
-        assert!(r.summary.contains("Yaesu FTDX10"));
+        assert_eq!(
+            r.summary,
+            "Radio answered with ID 0761 (listed as Yaesu FTDX10)."
+        );
+        let r = interpret_response(CatProtocol::KenwoodId, b"ID019;", &sent);
+        assert!(r.summary.contains("TS-2000 or a radio emulating it"));
+        let r = interpret_response(CatProtocol::KenwoodId, b"ID9999;", &sent);
+        assert_eq!(r.summary, "Radio answered with ID 9999.");
         assert!(response_complete(CatProtocol::KenwoodId, b"ID0761;", &sent));
         let r = interpret_response(CatProtocol::KenwoodId, b"?;", &sent);
         assert!(!r.recognized);
