@@ -1,0 +1,19 @@
+[package]
+name = "cominspect-cli"
+description = "Command-line serial port inventory (diagnostics and CI smoke tests)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "cominspect-cli"
+path = "src/main.rs"
+
+[dependencies]
+cominspect-core.workspace = true
+cominspect-platform.workspace = true
+cominspect-store.workspace = true
+serde_json.workspace = true

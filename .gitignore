@@ -1,0 +1,23 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Frontend
+/node_modules/
+/ui/dist/
+*.local
+
+# Tauri
+/src-tauri/gen/schemas/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Local secrets (never commit updater signing keys)
+*.key
+*.key.pub
+.env

@@ -1,0 +1,22 @@
+[package]
+name = "cominspect-store"
+description = "Persistent device database (SQLite) and inventory reconciliation for ComInspect"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cominspect-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
+rusqlite.workspace = true
+uuid.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

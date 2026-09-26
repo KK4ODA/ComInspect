@@ -1,0 +1,285 @@
+name: Release
+
+# Publishing a version:
+#   1. npm run version:set -- 1.2.3   (updates Cargo.toml, package.json, lockfiles)
+#   2. add a "## [1.2.3]" section to CHANGELOG.md, commit
+#   3. git tag v1.2.3 && git push origin v1.2.3
+# Tags with a pre-release suffix (v1.3.0-beta.1) become GitHub pre-releases
+# and are only offered to users who opted into the beta channel.
+# See docs/RELEASING.md for the one-time key and signing setup.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and publish, e.g. v0.1.0'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Check versions
+        id: meta
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          NPM_VERSION=$(node -p "require('./package.json').version")
+          if [ "$VERSION" != "$CARGO_VERSION" ] || [ "$VERSION" != "$NPM_VERSION" ]; then
+            echo "::error::Tag $TAG does not match Cargo.toml ($CARGO_VERSION) and package.json ($NPM_VERSION). Run: npm run version:set -- $VERSION"
+            exit 1
+          fi
+          if [[ "$VERSION" == *-* ]]; then PRERELEASE=true; else PRERELEASE=false; fi
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "prerelease=$PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check update signing setup
+        shell: bash
+        env:
+          HAS_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          PUBKEY=$(node -p "require('./src-tauri/tauri.conf.json').plugins.updater.pubkey")
+          if [ ${#PUBKEY} -lt 40 ]; then
+            echo "::error::plugins.updater.pubkey in src-tauri/tauri.conf.json is not set. See docs/RELEASING.md (one-time setup)."
+            exit 1
+          fi
+          if [ "$HAS_PRIVATE_KEY" != "true" ]; then
+            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is not set. See docs/RELEASING.md (one-time setup)."
+            exit 1
+          fi
+
+      - name: Extract release notes
+        shell: bash
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[?" v "\\]?" { found=1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for $VERSION"
+            exit 1
+          fi
+          cat notes.md
+
+      - name: Create draft release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          ARGS=(--draft --title "ComInspect ${{ steps.meta.outputs.version }}" --notes-file notes.md --verify-tag)
+          if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then ARGS+=(--prerelease); fi
+          # A re-run reuses the draft created by the first attempt.
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" "${ARGS[@]}"
+          fi
+          ID=$(gh release view "$TAG" --json databaseId --jq .databaseId 2> /dev/null || true)
+          if [ -z "$ID" ]; then
+            ID=$(gh api --paginate "repos/${{ github.repository }}/releases" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -1)
+          fi
+          if [ -z "$ID" ]; then
+            echo "::error::Could not find the release for $TAG"
+            exit 1
+          fi
+          echo "release_id=$ID" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            platform: windows-latest
+            args: ''
+          - name: macOS Apple silicon
+            platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+          - name: macOS Intel
+            platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+            cross: true
+          - name: Linux x64
+            platform: ubuntu-22.04
+            args: ''
+          - name: Linux ARM64
+            platform: ubuntu-22.04-arm
+            args: ''
+            optional: true
+    runs-on: ${{ matrix.platform }}
+    continue-on-error: ${{ matrix.optional == true }}
+    env:
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      APPLE_CERTIFICATE_B64: ${{ secrets.APPLE_CERTIFICATE }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Rust version (from rust-toolchain.toml)
+        id: rust
+        shell: bash
+        run: echo "version=$(grep -m1 '^channel' rust-toolchain.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.args }}
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf xdg-utils rpm
+
+      - run: npm ci
+
+      - name: Unit tests
+        if: ${{ !matrix.cross }}
+        run: cargo test --locked
+
+      # Optional Authenticode signing (removes SmartScreen warnings). Update
+      # integrity does not depend on it: updates are verified with the
+      # minisign key.
+      - name: Import Windows code-signing certificate
+        if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", $bytes)
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath "$env:RUNNER_TEMP\cert.pfx" -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          $config = @{ bundle = @{ windows = @{ certificateThumbprint = $cert.Thumbprint; digestAlgorithm = 'sha256'; timestampUrl = 'http://timestamp.digicert.com' } } } | ConvertTo-Json -Depth 5
+          Set-Content -Path src-tauri/windows-signing.conf.json -Value $config
+          "SIGNING_ARGS=--config src-tauri/windows-signing.conf.json" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # Optional Developer ID signing and notarization (removes Gatekeeper
+      # warnings). The Tauri CLI reads these variables when they are present.
+      # Without a certificate the app is signed ad hoc: Apple silicon Macs
+      # report an app downloaded with no signature at all as "damaged".
+      - name: macOS signing
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [ -n "$APPLE_CERTIFICATE_B64" ]; then
+            {
+              echo "APPLE_CERTIFICATE=${{ secrets.APPLE_CERTIFICATE }}"
+              echo "APPLE_CERTIFICATE_PASSWORD=${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
+              echo "APPLE_SIGNING_IDENTITY=${{ secrets.APPLE_SIGNING_IDENTITY }}"
+              echo "APPLE_ID=${{ secrets.APPLE_ID }}"
+              echo "APPLE_PASSWORD=${{ secrets.APPLE_PASSWORD }}"
+              echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}"
+            } >> "$GITHUB_ENV"
+          else
+            echo '{"bundle":{"macOS":{"signingIdentity":"-"}}}' > src-tauri/macos-adhoc.conf.json
+            echo "SIGNING_ARGS=--config src-tauri/macos-adhoc.conf.json" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build and upload
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseDraft: true
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
+          updaterJsonPreferNsis: true
+          retryAttempts: 1
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json ${{ env.SIGNING_ARGS }}
+
+  publish:
+    name: Publish
+    needs: [prepare, build]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      # Never publish a release whose update manifest is incomplete: installed
+      # apps read it through releases/latest/download/latest.json.
+      - name: Verify updater manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.prepare.outputs.tag }}"
+          gh release download "$TAG" -p latest.json -D manifest --clobber
+          node scripts/check-updater-manifest.mjs manifest/latest.json "${{ needs.prepare.outputs.version }}"
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.prepare.outputs.tag }}"
+          if [ "${{ needs.prepare.outputs.prerelease }}" = "true" ]; then
+            gh release edit "$TAG" --draft=false --prerelease
+          else
+            gh release edit "$TAG" --draft=false --latest
+          fi
+
+      # The beta feed always offers the newest release (beta or stable), so
+      # beta testers move on to the next stable version automatically.
+      - name: Update beta channel feed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FEEDS=updater-feeds
+          if ! gh release view "$FEEDS" > /dev/null 2>&1; then
+            gh release create "$FEEDS" --prerelease --title "Update feeds (not a release)" \
+              --notes "Machine-readable update feeds used by ComInspect's beta channel. Nothing to download here; see the other releases."
+          fi
+          gh release download "$FEEDS" -p beta.json -D current --clobber || true
+          if node scripts/check-updater-manifest.mjs --newer manifest/latest.json current/beta.json; then
+            cp manifest/latest.json beta.json
+            gh release upload "$FEEDS" beta.json --clobber
+            echo "Beta feed now offers ${{ needs.prepare.outputs.version }}"
+          else
+            echo "Beta feed already offers a newer version; unchanged."
+          fi

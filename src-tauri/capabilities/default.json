@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permissions of the main window. The UI only uses the app's own commands and core events; file dialogs, file access, URL opening and updates are performed by Rust commands.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
