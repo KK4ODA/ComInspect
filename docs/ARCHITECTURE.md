@@ -436,16 +436,20 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);  -- JSON valu
 ### Migrations
 
 * Migrations are numbered, forward-only Rust functions, each run inside one transaction.
-* **Before any migration**, the database file is copied to
-  `backups/inventory-schema<N>-<timestamp>.db` using SQLite's online backup API. The ten newest
-  backups are kept.
+* **Before any migration**, a consistent copy of the database is written with `VACUUM INTO` to
+  `backups/inventory-schema<N>-<timestamp>.db`. The same mechanism backs up the database before
+  every app update and import, and on request. The ten newest backups are kept.
 * **Forward compatibility.** Additive migrations (a new nullable column or table) leave
   `compat_schema` unchanged, so an *older* app can keep using a database written by a newer one.
   Only breaking migrations raise `compat_schema`.
 * **Newer, incompatible database.** If an older app finds a database with a schema newer than it
   supports and `compat_schema` above its own schema (e.g. after a rollback), it never
-  down-migrates. It opens the database **read-only** and offers to restore the pre-upgrade
-  backup. Discovery keeps working.
+  down-migrates or writes to the file. It runs on a **temporary in-memory database**, shows a
+  banner explaining why, and offers the pre-upgrade backup (Database backups → Restore).
+  Discovery keeps working.
+* **Damaged file.** If the file fails SQLite's integrity check, it is moved aside
+  (`inventory.damaged-<timestamp>.db`), a fresh database is created and the UI says where the old
+  file went.
 * Users never need to delete their configuration to upgrade.
 
 ### Export format (`serial-port-inventory.json`)
@@ -525,10 +529,16 @@ Import works as follows:
   7. Warnings
   8. Diagnostics
 * **Purpose / CAT distinction.** Purpose can be CAT, Secondary CAT, PTT, CW, Programming, Data,
-  KISS, GPS or Unknown. CAT status can be *Verified CAT*, *Not CAT* or *Unknown*, and is set only
-  by the user. After a successful explicit CAT query the app *offers* to mark the port verified.
-  For a CP2105, the hint says "Interface 0 is the Enhanced port; on Yaesu radios this is
-  normally the CAT port — verify against your manual."
+  KISS, GPS, Control, Other or Unknown. Categories are Radio CAT, PTT, CW Keying, TNC, KISS, GPS,
+  Rotator, Amplifier, Antenna tuner, Antenna switch, Programming cable, Radio interface,
+  Bluetooth serial, Virtual serial, Generic serial and Other. CAT status can be *Verified CAT*,
+  *Not CAT* or *Unknown*, and is set only by the user. After a successful explicit CAT query the
+  app *offers* to mark the port verified. For a CP2105, the hint says that interface 0 is the
+  Enhanced port, which radios with a built-in CP2105 document for CAT, and asks the user to
+  verify against the manual.
+* **Generic by design.** Nothing in the UI assumes a particular radio or brand. Placeholders are
+  neutral, CAT probes are described by protocol family, and diagnostic defaults are inferred from
+  what the device itself reports (USB strings, hints), always editable.
 * **Ignored ports.** Users can hide irrelevant ports (e.g. Intel AMT SOL, the motherboard COM1)
   and show them again with a toggle.
 * **Toasts** (bottom-right, auto-dismiss): "FTDX10 CAT Enhanced connected on COM7 (was COM5)".
@@ -582,8 +592,8 @@ Import works as follows:
 
 | Channel | Feed | Who gets it |
 |---|---|---|
-| Stable (default, only one shown in v1) | `https://github.com/KK4ODA/ComInspect/releases/latest/download/latest.json` — GitHub's "latest" excludes prereleases and drafts | Everyone |
-| Beta | `…/releases/download/updater-feeds/beta.json`, maintained by the release workflow for `vX.Y.Z-beta.N` tags (and advanced to newer stable releases) | Only users who explicitly opt in |
+| Stable (default; the channel selector is tucked away under About & updates → Advanced) | `https://github.com/KK4ODA/ComInspect/releases/latest/download/latest.json` — GitHub's "latest" excludes prereleases and drafts | Everyone |
+| Beta | `…/releases/download/updater-feeds/beta.json` (checked first) plus the stable feed. The release workflow copies each release's `latest.json` there when it is newer than the current one, so beta users also move on to newer stable releases | Only users who explicitly opt in |
 | Nightly | Same mechanism, `nightly.json` | Architected, not published in v1 |
 
 The channel is a stored setting that only the user can change, and endpoints are set at runtime
@@ -591,8 +601,8 @@ with `updater_builder().endpoints(…)`. Nothing ever moves a user to a beta sil
 
 ### In-app behavior
 
-* Five seconds after startup, and then every 24 hours while running, a background task checks
-  the feed. It never blocks startup, and failures are silent (logged only). The check can be
+* Five seconds after startup, and then whenever the last check is more than 20 hours old
+  (evaluated hourly while running), a background task checks the feed. It never blocks startup, and failures are silent (logged only). The check can be
   turned off in About / Updates. No telemetry is sent; the only request is an HTTPS GET of a
   static JSON file.
 * When an update is available, a subtle dot appears on the menu button, plus a status-bar item.
@@ -607,30 +617,40 @@ with `updater_builder().endpoints(…)`. Nothing ever moves a user to a beta sil
   * The reinstall uses the previous release's own signed `latest.json` (every release carries
     one) with an explicit, user-initiated version comparator. The rollback therefore goes through
     the same signature verification.
-  * Combined with the pre-migration database backups and the read-only newer-schema mode
-    ([§7](#migrations)), a failed update is recoverable without deleting anything.
+  * Combined with the pre-migration database backups and the temporary-database mode for newer
+    schemas ([§7](#migrations)), a failed update is recoverable without deleting anything.
 * **Post-update notice.** On the first launch of a new version the app shows a toast,
   "Updated to 1.3.0", and records the update in the database.
 
 ### Release pipeline (GitHub Actions)
 
 ```
-git tag v1.3.0 && git push --tags
+git tag v1.3.0 && git push origin v1.3.0
   └─► release.yml
-       1. verify: tag == Cargo/package version; unit tests on 3 OSes
-       2. build matrix (tauri-action): windows-latest (x64 NSIS+MSI),
-          macos-latest (aarch64 + x86_64), ubuntu-22.04 (AppImage, deb, rpm)
+       1. prepare: tag == Cargo/package version; update key configured;
+          CHANGELOG.md section → release notes; create a *draft* release
+       2. build matrix: unit tests, then tauri-action builds and uploads
+          windows-latest (x64 NSIS + MSI), macos-latest (aarch64 and x86_64),
+          ubuntu-22.04 (AppImage, deb, rpm), ubuntu-22.04-arm (optional)
           ├─ updater artifacts signed with TAURI_SIGNING_PRIVATE_KEY
           ├─ Windows Authenticode signing if certificate secrets are configured
-          └─ macOS codesign + notarization if Apple secrets are configured
-       3. upload to a *draft* release + latest.json
-       4. publish job: un-draft only after every platform succeeded
-          (so releases/latest/download/latest.json never points at a
-           half-uploaded release)
-       5. prerelease tags additionally refresh updater-feeds/beta.json
+          └─ macOS Developer ID + notarization if Apple secrets are configured,
+             ad-hoc signature otherwise
+       3. latest.json (one signed entry per platform and per installer type)
+          is uploaded to the draft
+       4. publish: scripts/check-updater-manifest.mjs verifies latest.json,
+          then the release is un-drafted (so releases/latest/download/latest.json
+          never points at a half-uploaded release)
+       5. every release refreshes updater-feeds/beta.json when it is newer
 ```
 
-`ci.yml` runs on every push and pull request:
+Installations from a package (`.msi`, `.deb`, `.rpm`) can only be updated with a package of the
+same kind (the updater looks up `{os}-{arch}-{installer}` first). If a release lacks one, the app
+says so and links to the download page, instead of downloading an artifact it cannot install.
+The manifest check warns about such gaps at release time.
+
+`ci.yml` runs on every push and pull request, with the Rust version pinned in
+`rust-toolchain.toml` so that a new Rust release cannot break the build by itself:
 
 * `cargo fmt --check` and `clippy -D warnings`
 * Unit tests on Windows, macOS and Linux
@@ -656,7 +676,7 @@ signing. Signing only removes SmartScreen and Gatekeeper warnings.
 | 6 | WebView availability: WebView2 on older Windows 10, WebKitGTK on Linux (webkit2gtk-4.1 needs Ubuntu 22.04+/Debian 12+) | The NSIS installer bootstraps WebView2; Linux requirements are documented; the CLI works without a GUI |
 | 7 | Code-signing cost and reputation (SmartScreen, Gatekeeper) | Optional signing hooks in CI; documented first-run steps for unsigned builds |
 | 8 | Loss of the updater private key would strand users | Documented key backup; runtime `pubkey` override enables key rotation in a future release |
-| 9 | Database corruption (power loss) or bad migration | SQLite WAL, transactional migrations, pre-migration backups, read-only fallback, and JSON export |
+| 9 | Database corruption (power loss) or bad migration | SQLite WAL, transactional migrations, pre-migration backups, damaged files moved aside, a temporary-database fallback, and JSON export |
 | 10 | ModemManager on Linux probes new `ttyACM` devices; counterfeit Prolific chips on Windows | Surfaced as warnings/hints (Code 10 on PL2303 explained) |
 | 11 | Future COM-number reassignment could corrupt the ComDB if done wrong | Deferred; architected around the supported `ComDBClaimPort`/`ComDBReleasePort` + `PortName` + friendly-name update path, requiring elevation and a restore point (see [§11](#11-mvp-scope)) |
 
@@ -673,8 +693,8 @@ signing. Signing only removes SmartScreen and Gatekeeper warnings.
   warnings.
 * Identity engine with fingerprint hierarchy, conflict vetoes, duplicate-serial handling and
   user merge.
-* SQLite database with migrations, pre-migration backups, forward-compatibility rules,
-  read-only fallback, history, port assignments and an event log.
+* SQLite database with migrations, pre-migration backups, forward-compatibility rules, a
+  temporary-database fallback, backup/restore UI, history, port assignments and an event log.
 * Svelte UI: table, filters, search, inspector with inline editing (nickname, equipment,
   category, purpose, CAT status, notes), ignore/unignore, merge, forget, toasts, status bar,
   keyboard navigation, light/dark.
@@ -691,13 +711,16 @@ signing. Signing only removes SmartScreen and Gatekeeper warnings.
   * Linux permission problems
 * Explicit, safe diagnostics:
   * open test (in use / permission / modem lines)
-  * read-only CAT query (Kenwood/Yaesu/Elecraft ASCII, Icom CI-V, legacy Yaesu binary)
+  * read-only CAT query (ASCII `ID;`/`FA;` as used by Kenwood, Elecraft, most Yaesu and many
+    others; Icom-style CI-V; legacy Yaesu 5-byte), with automatic baud-rate detection
   * time-limited PTT test via RTS or DTR, behind a double confirmation
 * JSON export/import with the identity / hardware / machine separation.
 * Updater: background check, badge, About/Updates, one-click install, channels (stable
   visible), launch confirmation, recovery banner, rollback to the previous signed release.
-* CLI (`cominspect-cli list|watch|db`), GitHub Actions CI on three OSes, and a release workflow
-  with signing hooks and draft → publish.
+* CLI (`cominspect-cli list|watch|inventory|export|db-path|test-open|cat|version`), GitHub
+  Actions CI on three OSes with a pinned Rust toolchain, and a release workflow with signing
+  hooks, draft → verify manifest → publish, and the beta feed.
+* Documentation: README, user guide, development and release guides.
 
 ### Deferred (architected, not implemented)
 
