@@ -777,6 +777,7 @@ export function createMockBackend(): Backend {
           version: '0.2.0',
           date: new Date(now - DAY).toISOString(),
           notes: '- Improved Bluetooth port identification\n- Added CAT-port labels for more Yaesu radios\n- Fixed device matching for FTDI dual-channel interfaces',
+          manualInstall: null,
         },
       });
     },

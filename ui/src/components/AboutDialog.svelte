@@ -87,6 +87,10 @@
         </div>
       {/if}
 
+      {#if u.available?.manualInstall && u.phase === 'available'}
+        <div class="callout">{u.available.manualInstall}</div>
+      {/if}
+
       {#if u.phase === 'downloading' || u.phase === 'installing'}
         <div class="progress" role="progressbar" aria-valuenow={percent ?? undefined} aria-valuemin="0" aria-valuemax="100">
           <div class="bar" style={`width: ${percent ?? 100}%`} class:indeterminate={percent == null}></div>
@@ -99,6 +103,10 @@
       <div class="buttons">
         {#if u.phase === 'ready_to_restart'}
           <button class="btn primary" onclick={() => app.backend?.restartApp()}><Icon name="refresh" size={14} /> Restart now</button>
+        {:else if u.available?.manualInstall && u.phase === 'available'}
+          <button class="btn primary" onclick={() => app.backend?.openLink('releases', u.available?.version)}>
+            <Icon name="external" size={14} /> Open the download page
+          </button>
         {:else if u.available && u.phase === 'available'}
           <button class="btn primary" onclick={() => app.installUpdate()} disabled={!u.supported}>
             <Icon name="download" size={14} /> Download and install update

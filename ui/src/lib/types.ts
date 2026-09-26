@@ -324,7 +324,13 @@ export interface UpdateStatus {
   configured: boolean;
   supported: boolean;
   phase: UpdatePhase;
-  available: { version: string; date: string | null; notes: string | null } | null;
+  available: {
+    version: string;
+    date: string | null;
+    notes: string | null;
+    /** Set when this installation cannot install the release itself (explains what to download). */
+    manualInstall: string | null;
+  } | null;
   lastChecked: number | null;
   error: string | null;
   channel: UpdateChannel;

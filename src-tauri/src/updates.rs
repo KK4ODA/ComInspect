@@ -69,6 +69,9 @@ pub struct AvailableUpdate {
     pub version: String,
     pub date: Option<String>,
     pub notes: Option<String>,
+    /// Set when this installation cannot install the release itself; the
+    /// text tells the user what to download instead.
+    pub manual_install: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -196,6 +199,31 @@ fn updater(app: &AppHandle, endpoints: Vec<String>) -> CmdResult<tauri_plugin_up
         .map_err(|e| CommandError::msg(e.to_string()))
 }
 
+/// Installations made from a .deb, .rpm or .msi package can only be updated
+/// with a package of the same kind. If a release's manifest has none, the
+/// updater falls back to the default download (AppImage or setup.exe): the
+/// Linux packages would refuse it after downloading, and on Windows it would
+/// install a second copy. Say so up front instead.
+fn manual_install_reason(
+    bundle: Option<tauri::utils::config::BundleType>,
+    download_url: &Url,
+) -> Option<String> {
+    use tauri::utils::config::BundleType;
+    let kind = match bundle? {
+        BundleType::Deb => "deb",
+        BundleType::Rpm => "rpm",
+        BundleType::Msi => "msi",
+        _ => return None,
+    };
+    let path = download_url.path().to_ascii_lowercase();
+    (!path.ends_with(&format!(".{kind}"))).then(|| {
+        format!(
+            "ComInspect was installed from the .{kind} package, and this release has no in-app \
+             update for it. Download the new .{kind} package from the releases page."
+        )
+    })
+}
+
 /// Checks the configured channel for a newer release.
 pub async fn check(app: &AppHandle) -> UpdateStatus {
     let state = app.state::<AppState>();
@@ -234,6 +262,10 @@ pub async fn check(app: &AppHandle) -> UpdateStatus {
                     .and_then(|d| d.as_str())
                     .map(str::to_string),
                 notes: update.body.clone(),
+                manual_install: manual_install_reason(
+                    tauri::utils::platform::bundle_type(),
+                    &update.download_url,
+                ),
             };
             log::info!("update available: {}", available.version);
             *lock(&state.updates.pending) = Some(update);
@@ -264,6 +296,11 @@ async fn download_and_install(
     update: tauri_plugin_updater::Update,
     on_event: &Channel<DownloadEvent>,
 ) -> CmdResult<()> {
+    if let Some(reason) =
+        manual_install_reason(tauri::utils::platform::bundle_type(), &update.download_url)
+    {
+        return Err(CommandError::msg(reason));
+    }
     // Safety net before replacing the application.
     {
         let state = app.state::<AppState>();
@@ -437,5 +474,30 @@ mod tests {
         let beta = UpdateChannel::Beta.endpoints();
         assert!(beta[0].ends_with("/updater-feeds/beta.json"));
         assert_eq!(UpdateChannel::default(), UpdateChannel::Stable);
+    }
+
+    #[test]
+    fn package_installs_need_a_matching_package() {
+        use tauri::utils::config::BundleType;
+        let url = |name: &str| {
+            Url::parse(&format!("{REPOSITORY}/releases/download/v1.0.0/{name}")).unwrap()
+        };
+        let appimage = url("ComInspect_1.0.0_amd64.AppImage");
+        let deb = url("ComInspect_1.0.0_amd64.deb");
+        let rpm = url("ComInspect-1.0.0-1.x86_64.rpm");
+
+        assert!(manual_install_reason(Some(BundleType::Deb), &deb).is_none());
+        assert!(manual_install_reason(Some(BundleType::Rpm), &rpm).is_none());
+        assert!(manual_install_reason(Some(BundleType::AppImage), &appimage).is_none());
+        assert!(manual_install_reason(None, &appimage).is_none());
+        let reason = manual_install_reason(Some(BundleType::Deb), &appimage).unwrap();
+        assert!(reason.contains(".deb package"));
+        assert!(manual_install_reason(Some(BundleType::Rpm), &deb).is_some());
+
+        let msi = url("ComInspect_1.0.0_x64_en-US.msi");
+        let setup = url("ComInspect_1.0.0_x64-setup.exe");
+        assert!(manual_install_reason(Some(BundleType::Msi), &msi).is_none());
+        assert!(manual_install_reason(Some(BundleType::Nsis), &setup).is_none());
+        assert!(manual_install_reason(Some(BundleType::Msi), &setup).is_some());
     }
 }
