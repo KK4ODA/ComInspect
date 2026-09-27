@@ -16,6 +16,7 @@ import type {
   Transport,
   UpdateStatus,
   UsageView,
+  VspeView,
 } from './types';
 
 const DAY = 86_400_000;
@@ -480,6 +481,30 @@ function buildDevices(): MockDevice[] {
     hint('builtin-uart', 'Built-in serial port', 'A serial port on the motherboard. On PCs this is usually an RS-232 header or DB-9 connector.'),
   ]);
 
+  // A VSPE splitter shares the FTDX10's CAT port (COM7) as COM21 and COM22.
+  for (const [deviceId, port, nickname, purpose] of [
+    [13, 'COM21', 'WSJT-X CAT (shared)', 'cat'],
+    [14, 'COM22', 'N1MM CAT (shared)', 'secondary_cat'],
+  ] as const) {
+    const shared = row({
+      deviceId,
+      status: 'connected',
+      port,
+      nickname,
+      equipment: 'Yaesu FTDX10',
+      category: 'radio_cat',
+      purpose,
+      deviceLabel: 'Eterlogic Virtual Serial Port',
+      manufacturer: 'Eterlogic',
+      transport: 'virtual',
+      virtualProvider: 'VSPE',
+      firstSeen: now - 30 * DAY,
+    });
+    const snap = snapshot(shared, { instanceId: `ROOT\\PORTS\\000${deviceId - 12}`, driver: 'vspe', provider: 'Eterlogic' });
+    snap.virtualPort = { provider: 'VSPE', detail: null, heuristic: true };
+    add(shared, snap);
+  }
+
   return devices;
 }
 
@@ -569,6 +594,24 @@ export function createMockBackend(): Backend {
       executable: 'C:\\VARA FM\\VARAFM.exe',
       description: 'VARA FM',
     },
+    COM7: {
+      pid: 2204,
+      processName: 'EterlogicVspeDeviceManagerService.exe',
+      executable: 'C:\\Program Files\\Eterlogic\\VSPE\\EterlogicVspeDeviceManagerService.exe',
+      description: 'VSPE service',
+    },
+    COM21: {
+      pid: 7340,
+      processName: 'wsjtx.exe',
+      executable: 'C:\\WSJT\\wsjtx\\bin\\wsjtx.exe',
+      description: 'WSJT-X',
+    },
+    COM22: {
+      pid: 5528,
+      processName: 'N1MMLogger.net.exe',
+      executable: 'C:\\Program Files (x86)\\N1MM Logger+\\N1MMLogger.net.exe',
+      description: 'N1MM Logger+',
+    },
   };
   const usage: UsageView = { ports: {}, limitation: null, checkedAt: Date.now() };
   for (const d of devices) {
@@ -580,6 +623,19 @@ export function createMockBackend(): Backend {
       : { state: 'free', since: now - 3 * 3600_000, sinceExact: false, watch: null };
   }
   const programs = new Map<number, string>([[8, 'C:\\VarAC\\VarAC.exe']]);
+  const vspe: VspeView = {
+    file: 'C:\\ProgramData\\Eterlogic\\VSPE\\autostart.vspe',
+    chosen: false,
+    devices: [
+      {
+        kind: 'Splitter',
+        settings: 'v2;7;28;v003,38400,8,0,0,0,2,2,0,0,5000,0,5000;2;21;6;0;;;22;6;0;;',
+        layout: { type: 'splitter', source: 'COM7', ports: ['COM21', 'COM22'], baud: 38400 },
+      },
+    ],
+    error: null,
+    modifiedAt: now - 30 * DAY,
+  };
   const usageView = (): UsageView => ({ ...structuredClone(usage), checkedAt: Date.now() });
   const emitUsage = () => {
     const v = usageView();
@@ -925,6 +981,9 @@ export function createMockBackend(): Backend {
       return delay(usageView());
     },
     getWatchProgram: (deviceId) => delay(programs.get(deviceId) ?? null),
+    getVspe: () => delay(vspe),
+    chooseVspeFile: () => delay({ ...vspe, chosen: true, file: 'C:\\Users\\ham\\Documents\\Shack.vspe' }, 200),
+    useVspeAutostart: () => delay(vspe),
     pickProgram: () => delay('C:\\VarAC\\VarAC.exe', 200),
     onUsageUpdated: async (cb): Promise<Unlisten> => {
       usageListeners.add(cb);

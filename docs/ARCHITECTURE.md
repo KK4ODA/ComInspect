@@ -30,6 +30,7 @@ that ships in this repository and marks any part that is deferred.
 10. [Major technical risks](#10-major-technical-risks)
 11. [MVP scope](#11-mvp-scope)
 12. [Which program has a port open (v0.2)](#12-which-program-has-a-port-open-v02)
+13. [VSPE links (v0.3)](#13-vspe-links-v03)
 
 ---
 
@@ -786,3 +787,37 @@ It emits `usage://updated`. When a watched port is free, it shows a notification
 shortcuts work, with the program's own folder as the working directory. The program is remembered
 per device in the settings table (`usage.program.<device id>`), and closing the window while waiting
 asks first. **The CLI** commands `who` and `wait-free` use the same probe.
+
+---
+
+## 13. VSPE links (v0.3)
+
+Eterlogic VSPE connects ports: a Splitter shares one port through up to eight virtual ports, a Pair
+joins two virtual ports, and user-mode devices (Redirector, TCP server and client, UDP) move data
+between ports and the network. None of this is visible in the device tree, so ComInspect reads
+VSPE's configuration (`cominspect-core/src/vspe.rs`).
+
+**Why the file and not the VSPE API.** VSPE publishes an API (`VSPE_API.dll`, or a COM server) with
+`vspe_getDeviceInfo`. It needs an activation key (free only for 32-bit), and it can't run while
+VSPE's own service does: using it would mean stopping the user's VSPE. The configuration file
+needs neither.
+
+**Where.** VSPE 1.5 and later run a service (*Eterlogic Virtual Serial Ports emulator service*)
+that loads `%ProgramData%\Eterlogic\VSPE\autostart.vspe` at startup. The app reads that file, or
+one the user chose (stored in the `vspe.file` setting), again whenever its window becomes active.
+
+**Format.** After a header with the 32-bit little-endian value `0x11223344` at offset 4, each
+device is a record: the device type (`Splitter`) and its settings string, each a 32-bit length
+followed by the bytes. VSPE 1.5.1 added titles, descriptions and a started/stopped state around the
+records, so they are found by shape (a known type name followed by printable settings) rather than
+at fixed offsets. Settings strings follow Eterlogic's *Devices initialization* page (for example
+`10;9;0;19200,0,8,1,0,0;0;0;0`: a Splitter sharing COM9 as COM10), except for VSPE 1.5's
+multi-port Splitter, `v2;<source>;<options>;<serial settings>;<count>;<port>;…`, where every virtual
+port has the same number of fields and starts with its number. Other versioned formats (`v3;…`, or a
+`v2` for other devices) are kept but not interpreted, so a future format can't produce wrong links.
+A real configuration saved by VSPE 1.5 is a test fixture.
+
+**Display.** The UI nests a Splitter's virtual ports under the port they share when both are in the
+list (`ui/src/lib/vspe.ts`). Only virtual ports are nested, the connected device wins when several
+devices had the source port's name, and chained splitters stay flat. Ports from known virtual-port
+software count as virtual whatever bus Windows lists them on, since VSPE's ports sit on its own bus.

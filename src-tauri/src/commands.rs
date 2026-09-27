@@ -25,6 +25,7 @@ use crate::lifecycle::{self, StartupInfo};
 use crate::state::{AppState, apply_scan, hostname, lock};
 use crate::updates::{self, DownloadEvent, UpdateChannel, UpdateStatus};
 use crate::usage::UsageView;
+use crate::vspe::{self, VspeView};
 
 // --- inventory ----------------------------------------------------------------
 
@@ -551,6 +552,64 @@ pub async fn get_watch_program(
         .store()
         .get_setting::<String>(&program_setting(device_id))?
         .filter(|p| std::path::Path::new(p).exists()))
+}
+
+// --- VSPE ----------------------------------------------------------------------
+
+/// The VSPE configuration: the file the user chose, or VSPE's startup
+/// configuration.
+#[tauri::command]
+pub async fn get_vspe(state: State<'_, AppState>) -> CmdResult<VspeView> {
+    let chosen = {
+        let inventory = lock(&state.inventory);
+        inventory
+            .store()
+            .get_setting::<String>(vspe::SETTING_FILE)?
+    };
+    Ok(vspe::view(chosen))
+}
+
+/// Lets the user pick a `.vspe` file to use instead of VSPE's startup
+/// configuration. `None` when the dialog was cancelled.
+#[tauri::command]
+pub async fn choose_vspe_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<Option<VspeView>> {
+    let dialog_app = app.clone();
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .set_title("VSPE configuration")
+            .add_filter("VSPE configuration", &["vspe"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| CommandError::msg(e.to_string()))?;
+    let Some(path) = chosen else { return Ok(None) };
+    let path: PathBuf = path
+        .into_path()
+        .map_err(|e| CommandError::msg(e.to_string()))?;
+    // Refuse files that are not VSPE configurations.
+    cominspect_platform::vspe::read_config(&path).map_err(CommandError::msg)?;
+    let file = path.display().to_string();
+    {
+        let inventory = lock(&state.inventory);
+        inventory.store().set_setting(vspe::SETTING_FILE, &file)?;
+    }
+    log::info!("using VSPE configuration {file}");
+    Ok(Some(vspe::view(Some(file))))
+}
+
+/// Goes back to VSPE's startup configuration.
+#[tauri::command]
+pub async fn use_vspe_autostart(state: State<'_, AppState>) -> CmdResult<VspeView> {
+    {
+        let inventory = lock(&state.inventory);
+        inventory.store().delete_setting(vspe::SETTING_FILE)?;
+    }
+    Ok(vspe::view(None))
 }
 
 #[tauri::command]

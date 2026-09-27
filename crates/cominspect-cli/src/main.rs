@@ -35,6 +35,8 @@ COMMANDS:
                                   start PROGRAM). Exits 2 on timeout (default 300 s,
                                   0 = no limit), 1 if the port disappears. Checks every
                                   MS milliseconds (default 500)
+    vspe [FILE] [--json]          Show the ports an Eterlogic VSPE configuration links (read-only);
+                                  without FILE, VSPE's startup configuration
     test-open PORT                Check whether PORT can be opened (may toggle DTR/RTS!)
     cat PORT --protocol P [--baud N|auto] [--stop-bits 1|2] [--civ HEX]
                                   Send one read-only CAT query. P is one of:
@@ -61,6 +63,7 @@ fn main() -> ExitCode {
         }
         "who" => cmd_who(rest),
         "wait-free" => return cmd_wait_free(rest),
+        "vspe" => cmd_vspe(rest),
         "test-open" => cmd_test_open(rest),
         "cat" => cmd_cat(rest),
         "version" | "--version" | "-V" => {
@@ -363,6 +366,29 @@ fn cmd_who(args: &[String]) -> Result<(), String> {
     }
     if let Some(note) = &snapshot.limitation {
         println!("\nNote: {note}");
+    }
+    Ok(())
+}
+
+fn cmd_vspe(args: &[String]) -> Result<(), String> {
+    use cominspect_platform::vspe;
+    let path = match positionals(args, &[]).into_iter().next() {
+        Some(file) => PathBuf::from(file),
+        None => vspe::autostart_config().ok_or(
+            "VSPE's startup configuration (autostart.vspe) was not found; name a .vspe file",
+        )?,
+    };
+    let devices = vspe::read_config(&path)?;
+    if flag(args, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&devices).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+    println!("{} ({} devices)", path.display(), devices.len());
+    for device in &devices {
+        println!("  {}", device.describe());
     }
     Ok(())
 }

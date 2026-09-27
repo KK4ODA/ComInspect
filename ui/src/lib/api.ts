@@ -20,6 +20,7 @@ import type {
   UpdateChannel,
   UpdateStatus,
   UsageView,
+  VspeView,
 } from './types';
 
 export type Unlisten = () => void;
@@ -71,6 +72,12 @@ export interface Backend {
   getWatchProgram(deviceId: number): Promise<string | null>;
   pickProgram(): Promise<string | null>;
   onUsageUpdated(cb: (view: UsageView) => void): Promise<Unlisten>;
+  /** The VSPE configuration: the chosen file, or VSPE's startup configuration. */
+  getVspe(): Promise<VspeView>;
+  /** Picks a .vspe file to use; null when cancelled. */
+  chooseVspeFile(): Promise<VspeView | null>;
+  /** Goes back to VSPE's startup configuration. */
+  useVspeAutostart(): Promise<VspeView>;
   onUsageReleased(cb: (event: ReleasedEvent) => void): Promise<Unlisten>;
   onInventoryUpdated(cb: (view: InventoryView) => void): Promise<Unlisten>;
   onInventoryEvents(cb: (events: InventoryEvent[]) => void): Promise<Unlisten>;
