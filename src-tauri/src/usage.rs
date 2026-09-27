@@ -25,6 +25,9 @@ pub const EVENT_USAGE_RELEASED: &str = "usage://released";
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 /// Checks while the window is visible.
 const VISIBLE_INTERVAL: Duration = Duration::from_secs(2);
+/// A change seen within this long of the previous check happened at most
+/// this long before it was seen.
+const CONTINUOUS_MS: i64 = 10_000;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,8 +42,13 @@ pub struct WatchView {
 pub struct PortUsageView {
     #[serde(flatten)]
     pub usage: PortUsage,
-    /// When the port entered its current state (ms since the epoch).
+    /// When the port was first seen in its current state (ms since the
+    /// epoch).
     pub since: i64,
+    /// True when ComInspect saw the change happen; false when the port was
+    /// already in this state when it was first checked, or after a pause in
+    /// checking (the change happened at `since` or earlier).
+    pub since_exact: bool,
     pub watch: Option<WatchView>,
 }
 
@@ -67,6 +75,14 @@ pub struct ReleasedEvent {
 struct Watch {
     armed_at: i64,
     then_open: Option<String>,
+    /// The programs last seen holding the port, for the release message.
+    holders: Option<PortUsage>,
+}
+
+#[derive(Clone, Copy)]
+struct Since {
+    at: i64,
+    exact: bool,
 }
 
 #[derive(Default)]
@@ -75,7 +91,7 @@ struct Inner {
     ports: BTreeMap<String, String>,
     snapshot: Option<UsageSnapshot>,
     checked_at: Option<i64>,
-    since: HashMap<String, i64>,
+    since: HashMap<String, Since>,
     watches: HashMap<String, Watch>,
     /// Set to check again right away.
     poke: bool,
@@ -113,6 +129,10 @@ impl UsageState {
                 }
             }
             inner.since.retain(|port, _| ports.contains_key(port));
+            // A port that comes back is checked afresh.
+            if let Some(snapshot) = inner.snapshot.as_mut() {
+                snapshot.ports.retain(|port, _| ports.contains_key(port));
+            }
             inner.ports = ports;
             inner.poke = true;
         }
@@ -161,6 +181,7 @@ impl UsageState {
                 Watch {
                     armed_at: now_ms(),
                     then_open: then_open.filter(|p| !p.trim().is_empty()),
+                    holders: current.filter(PortUsage::is_in_use),
                 },
             );
         }
@@ -198,11 +219,16 @@ fn view_of(inner: &Inner) -> UsageView {
             if !inner.ports.contains_key(port) {
                 continue;
             }
+            let since = inner.since.get(port).copied().unwrap_or(Since {
+                at: now_ms(),
+                exact: false,
+            });
             view.ports.insert(
                 port.clone(),
                 PortUsageView {
                     usage: usage.clone(),
-                    since: inner.since.get(port).copied().unwrap_or_else(now_ms),
+                    since: since.at,
+                    since_exact: since.exact,
                     watch: inner.watches.get(port).map(|w| WatchView {
                         armed_at: w.armed_at,
                         then_open: w.then_open.clone(),
@@ -225,16 +251,13 @@ fn window_visible(app: &AppHandle) -> bool {
         .is_some_and(|w| w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false))
 }
 
-/// A watched port was released: notify, and start the chosen program.
-fn announce_release(
-    app: &AppHandle,
-    port: &str,
-    label: &str,
-    before: &PortUsage,
-    waited_ms: i64,
-    watch: Watch,
-) {
-    let who = before.holder_names();
+/// A watched port is free: notify, and start the chosen program.
+fn announce_release(app: &AppHandle, port: &str, label: &str, waited_ms: i64, watch: Watch) {
+    let who = watch
+        .holders
+        .as_ref()
+        .map(PortUsage::holder_names)
+        .unwrap_or_default();
     let seconds = (waited_ms.max(0) as f64 / 1000.0).round() as i64;
     let mut message = format!(
         "{} is free: {} released it{}.",
@@ -324,20 +347,31 @@ fn run(app: AppHandle) {
                 let mut inner = lock(&usage.inner);
                 let previous = inner.snapshot.clone().unwrap_or_default();
                 let now = now_ms();
+                let continuous = inner.checked_at.is_some_and(|t| now - t <= CONTINUOUS_MS);
                 let diff = changes(&previous, &snapshot);
                 for change in &diff {
-                    inner.since.insert(change.port.clone(), now);
-                    if change.released()
-                        && let Some(watch) = inner.watches.remove(&change.port)
-                    {
-                        let label = inner.ports.get(&change.port).cloned().unwrap_or_default();
-                        released.push((
-                            change.port.clone(),
-                            label,
-                            change.before.clone().unwrap_or(PortUsage::Free),
-                            now - watch.armed_at,
-                            watch,
-                        ));
+                    let exact = continuous && change.before.is_some();
+                    inner
+                        .since
+                        .insert(change.port.clone(), Since { at: now, exact });
+                }
+                // A watched port that is free now ends its watch, however it
+                // got there (even if it was never seen in use).
+                let watched: Vec<String> = inner.watches.keys().cloned().collect();
+                for port in watched {
+                    match snapshot.ports.get(&port) {
+                        Some(PortUsage::Free) => {
+                            if let Some(watch) = inner.watches.remove(&port) {
+                                let label = inner.ports.get(&port).cloned().unwrap_or_default();
+                                released.push((port, label, now - watch.armed_at, watch));
+                            }
+                        }
+                        Some(in_use @ PortUsage::InUse { .. }) => {
+                            if let Some(watch) = inner.watches.get_mut(&port) {
+                                watch.holders = Some(in_use.clone());
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 let changed = !diff.is_empty()
@@ -347,8 +381,8 @@ fn run(app: AppHandle) {
                 inner.checked_at = Some(now);
                 changed
             };
-            for (port, label, before, waited, watch) in released {
-                announce_release(&app, &port, &label, &before, waited, watch);
+            for (port, label, waited, watch) in released {
+                announce_release(&app, &port, &label, waited, watch);
             }
             if changed {
                 let _ = app.emit(EVENT_USAGE_UPDATED, usage.view());

@@ -107,5 +107,6 @@ fn describe(pid: u32, proc_dir: &Path) -> PortHolder {
         process_name,
         executable: executable.map(|p| p.to_string_lossy().into_owned()),
         description: None,
+        exiting: false,
     }
 }

@@ -23,11 +23,17 @@
 //! and the query finishes), a new worker continues, and the stalled answer
 //! is used by a later check once it arrives.
 //!
-//! Answers are cached per handle for a few checks (a handle value cannot be
-//! reused while the handle is open). Before a port is reported released, the
-//! previous holders' handles are checked again without the cache, so a
-//! program that reopened the port under a recycled handle value is still
-//! seen.
+//! Answers are cached per handle for a few checks, except for the handles
+//! that named a port, which are read again at every check: a closed handle's
+//! value (and even its kernel object address) can be reused by the next file
+//! the program opens.
+//!
+//! Before a port is reported released, the previous holders' handles are
+//! read again without the cache. If one of those programs opened a handle
+//! since it was last seen with the port, and that handle's name cannot be
+//! read yet, it may have reopened the port, so the port stays "in use" for
+//! up to [`DOUBT_LIMIT`]. Handles it already had while it held the port are
+//! not suspected: a serial port can be open only once.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::c_void;
@@ -41,7 +47,7 @@ use windows_sys::Wdk::Foundation::{NtQueryObject, OBJECT_NAME_INFORMATION};
 use windows_sys::Wdk::System::SystemInformation::NtQuerySystemInformation;
 use windows_sys::Win32::Foundation::{
     CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, GENERIC_READ, HANDLE,
-    INVALID_HANDLE_VALUE, STATUS_INFO_LENGTH_MISMATCH,
+    INVALID_HANDLE_VALUE, STATUS_INFO_LENGTH_MISMATCH, STILL_ACTIVE,
 };
 use windows_sys::Win32::Security::{
     GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
@@ -51,8 +57,9 @@ use windows_sys::Win32::Storage::FileSystem::{
     OPEN_EXISTING, QueryDosDeviceW, VerQueryValueW,
 };
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentProcessId, OpenProcess, OpenProcessToken, PROCESS_DUP_HANDLE,
-    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, GetProcessHandleCount, OpenProcess,
+    OpenProcessToken, PROCESS_DUP_HANDLE, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    QueryFullProcessImageNameW,
 };
 
 use super::{PortHolder, PortUsage, UsageSnapshot};
@@ -64,9 +71,13 @@ const FILE_WRITE_DATA: u32 = 0x0002;
 /// A name query that has not returned after this long is treated as stalled.
 const STALL_AFTER: Duration = Duration::from_millis(100);
 /// While this many workers are stuck, no new queries are started.
-const MAX_STUCK_WORKERS: usize = 32;
-/// Cached answers are refreshed after this many checks.
+const MAX_STUCK_WORKERS: usize = 64;
+/// Cached answers are refreshed after this many checks (plus a per-handle
+/// offset of up to as many again, so they are not all refreshed at once).
 const RECHECK_AFTER: u64 = 10;
+/// How long a port stays "in use" after its program let go of it while that
+/// program has new handles whose names cannot be read yet.
+const DOUBT_LIMIT: Duration = Duration::from_secs(15);
 /// The handle table is refused beyond this size.
 const MAX_TABLE_BYTES: usize = 512 << 20;
 
@@ -131,6 +142,7 @@ impl Worker {
         let (worker_started, worker_abandoned) = (started.clone(), abandoned.clone());
         thread::Builder::new()
             .name("cominspect-usage-query".into())
+            .stack_size(256 << 10)
             .spawn(move || {
                 while let Ok(job) = job_rx.recv() {
                     if worker_abandoned.load(Ordering::SeqCst) {
@@ -173,8 +185,10 @@ enum Query {
 
 struct Classified {
     ports: HashSet<String>,
-    /// Some handle's name could not be read (yet).
-    uncertain: bool,
+    /// Handles that named a requested port.
+    port_keys: Vec<HandleKey>,
+    /// Handles whose names could not be read (yet).
+    unknown: Vec<HandleKey>,
 }
 
 /// Process handle opened for inspection; closed on drop.
@@ -198,6 +212,15 @@ pub struct Probe {
     pass: u64,
     cache: HashMap<HandleKey, Cached>,
     stalled: HashSet<HandleKey>,
+    /// The check at which each open handle was first listed.
+    first_seen: HashMap<HandleKey, u64>,
+    /// Handles that named a requested port at the previous check.
+    port_keys: HashSet<HandleKey>,
+    /// Port -> the last check at which a handle named it.
+    confirmed: HashMap<String, u64>,
+    /// Port -> when it was first kept "in use" only because its program has
+    /// new handles whose names are unknown.
+    doubt: HashMap<String, Instant>,
     late: Arc<Mutex<HashMap<HandleKey, Option<String>>>>,
     stuck: Arc<AtomicUsize>,
     worker: Option<Worker>,
@@ -217,6 +240,10 @@ impl Probe {
             pass: 0,
             cache: HashMap::new(),
             stalled: HashSet::new(),
+            first_seen: HashMap::new(),
+            port_keys: HashSet::new(),
+            confirmed: HashMap::new(),
+            doubt: HashMap::new(),
             late: Arc::new(Mutex::new(HashMap::new())),
             stuck: Arc::new(AtomicUsize::new(0)),
             worker: None,
@@ -345,6 +372,10 @@ impl Probe {
         let present: HashSet<HandleKey> = keys.iter().copied().collect();
         self.cache.retain(|k, _| present.contains(k));
         self.stalled.retain(|k| present.contains(k));
+        self.first_seen.retain(|k, _| present.contains(k));
+        for key in &keys {
+            self.first_seen.entry(*key).or_insert(self.pass);
+        }
         if let Ok(mut late) = self.late.lock() {
             for (key, name) in late.drain() {
                 self.stalled.remove(&key);
@@ -372,18 +403,17 @@ impl Probe {
         for key in candidates {
             by_pid.entry(key.pid).or_default().push(*key);
         }
+        let mut port_keys = HashSet::new();
         let mut ports_by_pid: HashMap<u32, HashSet<String>> = HashMap::new();
         for (pid, keys) in &by_pid {
             let found = self.classify_process(*pid, keys, wanted, false, incomplete);
+            port_keys.extend(found.port_keys);
             if !found.ports.is_empty() {
                 ports_by_pid.insert(*pid, found.ports);
             }
         }
 
         // Before reporting a port released, look again at whoever held it.
-        // A holder that is still running and has a handle whose name cannot
-        // be read right now (synchronous I/O in progress) may still have the
-        // port open, so the port is not reported free yet.
         let mut suspects: HashMap<u32, Vec<String>> = HashMap::new();
         for (port, pids) in &self.last_holders {
             let still_held = ports_by_pid.values().any(|ports| ports.contains(port));
@@ -393,25 +423,60 @@ impl Probe {
                 }
             }
         }
+        let now = Instant::now();
+        let mut doubtful = HashSet::new();
         for (pid, previous_ports) in suspects {
-            if let Some(keys) = by_pid.get(&pid) {
-                let found = self.classify_process(pid, keys, wanted, true, incomplete);
-                let entry = ports_by_pid.entry(pid).or_default();
-                entry.extend(found.ports);
-                if found.uncertain {
-                    entry.extend(previous_ports);
+            let keys = by_pid.get(&pid).map(Vec::as_slice).unwrap_or_default();
+            let found = self.classify_process(pid, keys, wanted, true, incomplete);
+            port_keys.extend(found.port_keys);
+            let entry = ports_by_pid.entry(pid).or_default();
+            entry.extend(found.ports);
+            // A program that is shutting down closes its handles one by one,
+            // and closing a port can take a while (pending I/O on a USB
+            // adapter): Windows removes the handle from the table first, so
+            // the port counts as in use until the program is done.
+            let exiting = self
+                .open_process(pid, 0)
+                .is_some_and(|p| shutting_down(p.handle));
+            for port in previous_ports {
+                if entry.contains(&port) {
+                    continue;
                 }
-                if entry.is_empty() {
-                    ports_by_pid.remove(&pid);
+                if exiting {
+                    entry.insert(port);
+                    continue;
+                }
+                // Only a handle opened after the port was last seen open in
+                // this program can be the port reopened.
+                let confirmed = self.confirmed.get(&port).copied().unwrap_or(0);
+                let reopened = found
+                    .unknown
+                    .iter()
+                    .any(|k| self.first_seen.get(k).is_some_and(|&seen| seen > confirmed));
+                if !reopened {
+                    continue;
+                }
+                let since = *self.doubt.entry(port.clone()).or_insert(now);
+                if now.duration_since(since) < DOUBT_LIMIT {
+                    doubtful.insert(port.clone());
+                    entry.insert(port);
                 }
             }
+            if entry.is_empty() {
+                ports_by_pid.remove(&pid);
+            }
         }
+        self.doubt.retain(|port, _| doubtful.contains(port));
+        self.port_keys = port_keys;
 
         let mut holders: HashMap<String, Vec<PortHolder>> = HashMap::new();
         self.last_holders.clear();
         for (pid, ports) in ports_by_pid {
             let holder = self.describe(pid);
             for port in ports {
+                if !doubtful.contains(&port) {
+                    self.confirmed.insert(port.clone(), self.pass);
+                }
                 self.last_holders
                     .entry(port.clone())
                     .or_default()
@@ -419,10 +484,13 @@ impl Probe {
                 holders.entry(port).or_default().push(holder.clone());
             }
         }
+        let held: HashSet<&String> = holders.keys().collect();
+        self.confirmed.retain(|port, _| held.contains(port));
         holders
     }
 
-    /// Ports a process has open. `fresh` ignores cached answers.
+    /// Ports a process has open. `fresh` ignores cached answers; handles
+    /// that named a port at the previous check are always read again.
     fn classify_process(
         &mut self,
         pid: u32,
@@ -431,27 +499,24 @@ impl Probe {
         fresh: bool,
         incomplete: &mut bool,
     ) -> Classified {
-        let mut devices: Vec<String> = Vec::new();
+        let mut named: Vec<(HandleKey, String)> = Vec::new();
         let mut to_query = Vec::new();
-        let mut uncertain = false;
+        let mut unknown = Vec::new();
         for key in keys {
             let cached = self.cache.get(key);
             if self.stalled.contains(key) {
                 // Still waiting for an earlier answer; the handle is still
                 // open, so an earlier answer is still right.
                 match cached.and_then(|c| c.device.clone()) {
-                    Some(device) => devices.push(device),
-                    None => {
-                        uncertain = true;
-                        *incomplete |= cached.is_none();
-                    }
+                    Some(device) => named.push((*key, device)),
+                    None => unknown.push(*key),
                 }
                 continue;
             }
             match cached {
-                Some(c) if !fresh && self.pass.saturating_sub(c.at) < RECHECK_AFTER => {
+                Some(c) if !fresh && !self.port_keys.contains(key) && self.recent(key, c) => {
                     if let Some(device) = &c.device {
-                        devices.push(device.clone());
+                        named.push((*key, device.clone()));
                     }
                 }
                 _ => to_query.push(*key),
@@ -461,18 +526,19 @@ impl Probe {
         if !to_query.is_empty() {
             match self.open_process(pid, PROCESS_DUP_HANDLE) {
                 Some(process) => {
-                    for key in to_query {
+                    for (i, key) in to_query.iter().enumerate() {
                         if self.stuck.load(Ordering::SeqCst) >= MAX_STUCK_WORKERS {
                             *incomplete = true;
-                            uncertain = true;
+                            unknown.extend(&to_query[i..]);
                             break;
                         }
-                        match self.query_handle(&process, key) {
-                            Some(Some(device)) => devices.push(device),
+                        match self.query_handle(&process, *key) {
+                            Some(Some(device)) => named.push((*key, device)),
                             Some(None) => {}
-                            None => match self.cache.get(&key).and_then(|c| c.device.clone()) {
-                                Some(device) => devices.push(device),
-                                None => uncertain = true,
+                            // Stalled: an earlier answer still holds.
+                            None => match self.cache.get(key).and_then(|c| c.device.clone()) {
+                                Some(device) => named.push((*key, device)),
+                                None => unknown.push(*key),
                             },
                         }
                     }
@@ -485,12 +551,24 @@ impl Probe {
         }
 
         let mut ports = HashSet::new();
-        for device in devices {
+        let mut port_keys = Vec::new();
+        for (key, device) in named {
             if let Some(names) = wanted.get(&device) {
                 ports.extend(names.iter().cloned());
+                port_keys.push(key);
             }
         }
-        Classified { ports, uncertain }
+        Classified {
+            ports,
+            port_keys,
+            unknown,
+        }
+    }
+
+    /// Whether a cached answer is recent enough to use.
+    fn recent(&self, key: &HandleKey, cached: &Cached) -> bool {
+        let spread = (key.handle as u64 >> 2) % RECHECK_AFTER;
+        self.pass.saturating_sub(cached.at) < RECHECK_AFTER + spread
     }
 
     /// Duplicates one handle and reads its device name. `None` when the
@@ -608,9 +686,9 @@ impl Probe {
     }
 
     fn describe(&mut self, pid: u32) -> PortHolder {
-        let executable = self
-            .open_process(pid, 0)
-            .and_then(|p| process_image(p.handle));
+        let process = self.open_process(pid, 0);
+        let executable = process.as_ref().and_then(|p| process_image(p.handle));
+        let exiting = process.as_ref().is_some_and(|p| shutting_down(p.handle));
         let process_name = executable
             .as_deref()
             .and_then(|p| p.rsplit(['\\', '/']).next())
@@ -628,6 +706,7 @@ impl Probe {
             process_name,
             executable,
             description,
+            exiting,
         }
     }
 
@@ -759,6 +838,19 @@ fn open_nul() -> Option<HANDLE> {
         )
     };
     (handle != INVALID_HANDLE_VALUE && !handle.is_null()).then_some(handle)
+}
+
+/// True while a process exits: it has an exit code but still has handles
+/// that Windows is closing.
+fn shutting_down(process: HANDLE) -> bool {
+    let mut code = 0u32;
+    // SAFETY: a valid process handle and an out-pointer.
+    if unsafe { GetExitCodeProcess(process, &mut code) } == 0 || code == STILL_ACTIVE as u32 {
+        return false;
+    }
+    let mut handles = 0u32;
+    // SAFETY: as above.
+    unsafe { GetProcessHandleCount(process, &mut handles) != 0 && handles > 0 }
 }
 
 fn process_image(process: HANDLE) -> Option<String> {
@@ -964,9 +1056,23 @@ mod tests {
         }
     }
 
+    impl Probe {
+        /// What the probe knows about a process, for test failure messages.
+        fn explain(&self, pid: u32) -> String {
+            let mut stalled: Vec<_> = self.stalled.iter().filter(|k| k.pid == pid).collect();
+            stalled.sort();
+            format!(
+                "pass {}, stalled handles {stalled:?}, port handles {:?}, confirmed {:?}, doubt {:?}",
+                self.pass, self.port_keys, self.confirmed, self.doubt
+            )
+        }
+    }
+
     /// Opens a real serial port when the environment names one
     /// (`COMINSPECT_TEST_PORT=COM2` in CI) and checks that this process is
-    /// reported as its holder, and that the port is free after closing it.
+    /// reported as its holder, that the port is free once closed (even when
+    /// the next file opened reuses the closed handle), and that reopening it
+    /// at once is seen.
     #[test]
     fn detects_this_process_holding_a_port() {
         use std::os::windows::fs::OpenOptionsExt;
@@ -974,28 +1080,48 @@ mod tests {
             eprintln!("COMINSPECT_TEST_PORT not set; skipping");
             return;
         };
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .share_mode(0)
-            .open(format!(r"\\.\{port}"))
-            .unwrap_or_else(|e| panic!("cannot open {port}: {e}"));
-        let mut probe = Probe::new();
-        let ports = vec![port.clone()];
-        let snapshot = probe.check(&ports);
-        let usage = &snapshot.ports[&port];
+        let open = || {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .share_mode(0)
+                .open(format!(r"\\.\{port}"))
+                .unwrap_or_else(|e| panic!("cannot open {port}: {e}"))
+        };
         // SAFETY: no preconditions.
         let me = unsafe { GetCurrentProcessId() };
-        assert!(
-            usage.holders().iter().any(|h| h.pid == me),
-            "this process not reported as holding {port}: {usage:?}"
-        );
+        let ports = vec![port.clone()];
+        let mut probe = Probe::new();
+        let check = |probe: &mut Probe| {
+            let usage = probe.check(&ports).ports[&port].clone();
+            let mine = usage.holders().iter().any(|h| h.pid == me);
+            (mine, format!("{usage:?}; {}", probe.explain(me)))
+        };
+
+        let file = open();
+        let (mine, state) = check(&mut probe);
+        assert!(mine, "this process not reported as holding {port}: {state}");
+
         drop(file);
-        let after = probe.check(&ports);
+        // The next file opened with the same access often gets the closed
+        // handle's value and kernel object.
+        let other = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(r"\\.\NUL")
+            .expect("NUL");
+        let (mine, state) = check(&mut probe);
+        assert!(!mine, "{port} still reported in use after closing: {state}");
+        drop(other);
+
+        let file = open();
+        let (mine, state) = check(&mut probe);
+        assert!(mine, "{port} reopened at once was not seen: {state}");
+        drop(file);
+        let (mine, state) = check(&mut probe);
         assert!(
-            !after.ports[&port].holders().iter().any(|h| h.pid == me),
-            "{port} still reported in use after closing: {:?}",
-            after.ports[&port]
+            !mine,
+            "{port} still reported in use after closing again: {state}"
         );
     }
 }

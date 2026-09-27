@@ -20,6 +20,10 @@ pub struct PortHolder {
     /// Human-readable program name (on Windows the executable's file
     /// description, e.g. "VARA FM").
     pub description: Option<String>,
+    /// The program is shutting down and still closing its handles (the port
+    /// may be closing too).
+    #[serde(default)]
+    pub exiting: bool,
 }
 
 impl PortHolder {
@@ -38,13 +42,19 @@ impl PortHolder {
         }
     }
 
-    /// "VARA FM (VARAFM.exe, PID 4312)".
+    /// "VARA FM (VARAFM.exe, PID 4312)", with ", shutting down" appended
+    /// while the program exits.
     pub fn describe(&self) -> String {
         let display = self.display_name();
-        if display.eq_ignore_ascii_case(&self.process_name) {
+        let text = if display.eq_ignore_ascii_case(&self.process_name) {
             format!("{display} (PID {})", self.pid)
         } else {
             format!("{display} ({}, PID {})", self.process_name, self.pid)
+        };
+        if self.exiting {
+            format!("{text}, shutting down")
+        } else {
+            text
         }
     }
 }
@@ -173,6 +183,7 @@ mod tests {
             process_name: name.into(),
             executable: None,
             description: description.map(Into::into),
+            exiting: false,
         }
     }
 
@@ -189,6 +200,12 @@ mod tests {
             "VARA FM (VARAFM.exe, PID 4312)"
         );
         assert_eq!(holder(7, "flrig", None).describe(), "flrig (PID 7)");
+        let mut closing = holder(4312, "VARAFM.exe", Some("VARA FM"));
+        closing.exiting = true;
+        assert_eq!(
+            closing.describe(),
+            "VARA FM (VARAFM.exe, PID 4312), shutting down"
+        );
     }
 
     #[test]

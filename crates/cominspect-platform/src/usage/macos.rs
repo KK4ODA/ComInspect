@@ -230,5 +230,6 @@ fn describe(pid: c_int) -> PortHolder {
         process_name,
         executable,
         description: None,
+        exiting: false,
     }
 }
