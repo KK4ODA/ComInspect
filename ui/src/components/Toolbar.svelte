@@ -104,6 +104,12 @@
           <button role="menuitem" onclick={() => run(() => (app.dialog = 'backups'))}>
             <Icon name="database" size={15} /> Database backups…
           </button>
+          {#if app.appInfo?.platform === 'windows'}
+            <button role="menuitem" onclick={() => run(() => (app.dialog = 'vspe'))}>
+              <Icon name="link" size={15} /> VSPE configuration…
+              {#if app.vspeMissing.length}<span class="pill warn">{app.vspeMissing.length} missing</span>{/if}
+            </button>
+          {/if}
           <hr />
           <button role="menuitemcheckbox" aria-checked={app.showIgnored} onclick={() => run(() => app.setShowIgnored(!app.showIgnored))}>
             <Icon name={app.showIgnored ? 'check' : 'eye-off'} size={15} /> Show ignored ports

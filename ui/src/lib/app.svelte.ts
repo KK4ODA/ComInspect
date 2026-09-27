@@ -1,5 +1,5 @@
 import { errorMessage, getBackend, type Backend, type Unlisten } from './api';
-import { treeRows, vspeLinks, type PortLinks, type TreeRow } from './vspe';
+import { missingFromConfig, treeRows, vspeLinks, type PortLinks, type TreeRow } from './vspe';
 import {
   applyFilters,
   type Filters,
@@ -32,7 +32,7 @@ export interface Toast {
   action?: { label: string; run: () => void };
 }
 
-export type DialogKind = 'about' | 'import' | 'backups' | 'merge' | 'confirm' | null;
+export type DialogKind = 'about' | 'import' | 'backups' | 'merge' | 'confirm' | 'vspe' | null;
 
 export interface ConfirmRequest {
   title: string;
@@ -92,6 +92,8 @@ class AppStore {
   links: PortLinks = $derived(vspeLinks(this.vspe?.devices ?? []));
   /** `rows` in display order: VSPE Splitter ports under the port they share. */
   tree: TreeRow[] = $derived(treeRows(this.rows, this.links));
+  /** Connected VSPE ports the VSPE configuration doesn't mention. */
+  vspeMissing: string[] = $derived(missingFromConfig(this.view?.rows ?? [], this.vspe));
   selectedRow: PortRow | null = $derived(
     this.view?.rows.find((r) => r.deviceId === this.selectedId) ?? null,
   );
@@ -238,6 +240,17 @@ class AppStore {
       if (view) this.vspe = view;
     } catch (e) {
       this.error('Could not use that file', e);
+    }
+  }
+
+  /** Lets the user pick a folder whose newest .vspe file is shown. */
+  async chooseVspeFolder(): Promise<void> {
+    if (!this.backend) return;
+    try {
+      const view = await this.backend.chooseVspeFolder();
+      if (view) this.vspe = view;
+    } catch (e) {
+      this.error('Could not use that folder', e);
     }
   }
 

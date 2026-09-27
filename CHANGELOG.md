@@ -5,6 +5,24 @@ All notable changes to ComInspect are documented here. The format is based on
 [Semantic Versioning](https://semver.org/). The release workflow publishes the
 section matching the tag as the release notes shown in the app.
 
+## [0.3.1] - 2026-09-27
+
+Choose which VSPE configuration ComInspect reads.
+
+### Added
+
+- **Menu → VSPE configuration…** chooses where ComInspect reads VSPE's setup: VSPE's startup
+  configuration (as before), a specific `.vspe` file, or the newest `.vspe` file in a folder, for
+  when you save a new file for every change. The dialog shows the file, when it was saved and the
+  devices in it.
+- ComInspect names VSPE ports that aren't in the configuration it reads, for example a splitter
+  added after the file was saved: in their VSPE section, in the dialog and in the menu.
+- `cominspect-cli vspe FOLDER` reads the newest `.vspe` file in a folder.
+
+### Changed
+
+- The VSPE section of the details panel says which file it read and when that was saved.
+
 ## [0.3.0] - 2026-09-27
 
 See how VSPE connects your ports.

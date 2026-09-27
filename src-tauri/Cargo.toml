@@ -39,3 +39,6 @@ tauri-plugin-single-instance = "2.4"
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

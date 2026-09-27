@@ -1,4 +1,4 @@
-import type { PortRow, VspeDevice } from './types';
+import type { PortRow, VspeDevice, VspeView } from './types';
 
 /** A VSPE Splitter: `source` shared through the virtual `ports`. */
 export interface SplitterLink {
@@ -113,4 +113,71 @@ export function treeRows(rows: PortRow[], links: PortLinks): TreeRow[] {
 export function portList(ports: string[]): string {
   if (ports.length <= 1) return ports[0] ?? '';
   return `${ports.slice(0, -1).join(', ')} and ${ports[ports.length - 1]}`;
+}
+
+/** One line per device: "Splitter: COM5 shared as COM8 and COM10 (9600 baud)". */
+export function describeDevice(d: VspeDevice): string {
+  const l = d.layout;
+  if (!l) return `${d.kind}: not understood by ComInspect yet`;
+  switch (l.type) {
+    case 'splitter':
+      return `Splitter: ${l.source} shared as ${portList(l.ports)}${l.baud ? ` (${l.baud} baud)` : ''}`;
+    case 'connector':
+      return `Connector: ${l.port}`;
+    case 'pair':
+      return `Pair: ${l.ports.join(' ↔ ')}`;
+    case 'redirector':
+      return `Redirector: ${l.ports.join(' ↔ ')}`;
+    case 'network':
+      return `${l.protocol}: ${l.port} on ${l.address}`;
+  }
+}
+
+/** Every port the configuration mentions (upper case). */
+export function mentionedPorts(devices: VspeDevice[]): Set<string> {
+  const ports = new Set<string>();
+  for (const { layout } of devices) {
+    if (!layout) continue;
+    if (layout.type === 'splitter') {
+      ports.add(key(layout.source));
+      layout.ports.forEach((p) => ports.add(key(p)));
+    } else if (layout.type === 'connector' || layout.type === 'network') {
+      ports.add(key(layout.port));
+    } else {
+      layout.ports.forEach((p) => ports.add(key(p)));
+    }
+  }
+  return ports;
+}
+
+/**
+ * Connected VSPE ports the configuration doesn't mention: a sign that VSPE's
+ * setup changed since the file was saved. Empty when no file was read.
+ */
+export function missingFromConfig(rows: PortRow[], view: VspeView | null): string[] {
+  if (!view?.file || view.error) return [];
+  const known = mentionedPorts(view.devices);
+  return rows
+    .filter((r) => r.virtualProvider === 'VSPE' && r.port && (r.status === 'connected' || r.status === 'problem'))
+    .map((r) => r.port!)
+    .filter((p) => !known.has(key(p)))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+/** The last part of a Windows or Unix path. */
+export function baseName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+/** "VSPE's startup configuration", "Shack.vspe" or "Lenovo_X1_092726.vspe (newest in VSPE)". */
+export function sourceLabel(view: VspeView): string {
+  const file = view.file ? baseName(view.file) : null;
+  switch (view.source.mode) {
+    case 'autostart':
+      return "VSPE's startup configuration";
+    case 'file':
+      return file ?? baseName(view.source.path);
+    case 'folder':
+      return file ? `${file} (newest in ${baseName(view.source.path)})` : `the newest file in ${baseName(view.source.path)}`;
+  }
 }

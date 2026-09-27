@@ -803,8 +803,12 @@ VSPE's own service does: using it would mean stopping the user's VSPE. The confi
 needs neither.
 
 **Where.** VSPE 1.5 and later run a service (*Eterlogic Virtual Serial Ports emulator service*)
-that loads `%ProgramData%\Eterlogic\VSPE\autostart.vspe` at startup. The app reads that file, or
-one the user chose (stored in the `vspe.file` setting), again whenever its window becomes active.
+that loads `%ProgramData%\Eterlogic\VSPE\autostart.vspe` at startup. The app reads that file by
+default, or a file the user chose, or the newest `.vspe` file in a folder the user chose (for people
+who save a dated file per change). The choice is the `vspe.source` setting (0.3.0's `vspe.file` is
+read as a chosen file). The file is read again whenever the window becomes active. Connected VSPE
+ports that the file doesn't mention are flagged, since they mean the file is older than VSPE's
+current setup.
 
 **Format.** After a header with the 32-bit little-endian value `0x11223344` at offset 4, each
 device is a record: the device type (`Splitter`) and its settings string, each a 32-bit length

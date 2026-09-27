@@ -517,12 +517,22 @@ export interface VspeDevice {
   layout: VspeLayout | null;
 }
 
+/** Where ComInspect reads the VSPE configuration. */
+export type VspeSource =
+  | { mode: 'autostart' }
+  | { mode: 'file'; path: string }
+  /** The newest .vspe file in the folder. */
+  | { mode: 'folder'; path: string };
+
 export interface VspeView {
+  source: VspeSource;
+  /** Where VSPE keeps its startup configuration (Windows only). */
+  autostartPath: string | null;
   /** The configuration file read, if any. */
   file: string | null;
-  /** True when the user chose the file; false for VSPE's startup configuration. */
-  chosen: boolean;
   devices: VspeDevice[];
+  /** Why no configuration could be read. */
   error: string | null;
+  /** When the file read was last saved (ms since the epoch). */
   modifiedAt: number | null;
 }

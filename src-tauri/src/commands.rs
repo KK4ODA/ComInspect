@@ -25,7 +25,7 @@ use crate::lifecycle::{self, StartupInfo};
 use crate::state::{AppState, apply_scan, hostname, lock};
 use crate::updates::{self, DownloadEvent, UpdateChannel, UpdateStatus};
 use crate::usage::UsageView;
-use crate::vspe::{self, VspeView};
+use crate::vspe::{self, VspeSource, VspeView};
 
 // --- inventory ----------------------------------------------------------------
 
@@ -556,21 +556,27 @@ pub async fn get_watch_program(
 
 // --- VSPE ----------------------------------------------------------------------
 
-/// The VSPE configuration: the file the user chose, or VSPE's startup
-/// configuration.
+/// The VSPE configuration, from wherever the user asked ComInspect to read it.
 #[tauri::command]
 pub async fn get_vspe(state: State<'_, AppState>) -> CmdResult<VspeView> {
-    let chosen = {
+    let source = {
         let inventory = lock(&state.inventory);
-        inventory
-            .store()
-            .get_setting::<String>(vspe::SETTING_FILE)?
+        VspeSource::load(inventory.store())?
     };
-    Ok(vspe::view(chosen))
+    Ok(vspe::view(source))
 }
 
-/// Lets the user pick a `.vspe` file to use instead of VSPE's startup
-/// configuration. `None` when the dialog was cancelled.
+fn use_vspe_source(state: &AppState, source: VspeSource) -> CmdResult<VspeView> {
+    {
+        let inventory = lock(&state.inventory);
+        source.save(inventory.store())?;
+    }
+    log::info!("VSPE configuration source: {source:?}");
+    Ok(vspe::view(source))
+}
+
+/// Picks a `.vspe` file to read instead of VSPE's startup configuration.
+/// `None` when the dialog was cancelled.
 #[tauri::command]
 pub async fn choose_vspe_file(
     app: AppHandle,
@@ -581,7 +587,7 @@ pub async fn choose_vspe_file(
         dialog_app
             .dialog()
             .file()
-            .set_title("VSPE configuration")
+            .set_title("VSPE configuration file")
             .add_filter("VSPE configuration", &["vspe"])
             .blocking_pick_file()
     })
@@ -593,23 +599,45 @@ pub async fn choose_vspe_file(
         .map_err(|e| CommandError::msg(e.to_string()))?;
     // Refuse files that are not VSPE configurations.
     cominspect_platform::vspe::read_config(&path).map_err(CommandError::msg)?;
-    let file = path.display().to_string();
-    {
-        let inventory = lock(&state.inventory);
-        inventory.store().set_setting(vspe::SETTING_FILE, &file)?;
+    let path = path.display().to_string();
+    use_vspe_source(&state, VspeSource::File { path }).map(Some)
+}
+
+/// Picks a folder whose newest `.vspe` file is read. `None` when the dialog
+/// was cancelled.
+#[tauri::command]
+pub async fn choose_vspe_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<Option<VspeView>> {
+    let dialog_app = app.clone();
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .set_title("Folder with your VSPE configuration files")
+            .blocking_pick_folder()
+    })
+    .await
+    .map_err(|e| CommandError::msg(e.to_string()))?;
+    let Some(path) = chosen else { return Ok(None) };
+    let path: PathBuf = path
+        .into_path()
+        .map_err(|e| CommandError::msg(e.to_string()))?;
+    if cominspect_platform::vspe::newest_config_in(&path).is_none() {
+        return Err(CommandError::msg(format!(
+            "There are no VSPE configuration files (.vspe) in {}.",
+            path.display()
+        )));
     }
-    log::info!("using VSPE configuration {file}");
-    Ok(Some(vspe::view(Some(file))))
+    let path = path.display().to_string();
+    use_vspe_source(&state, VspeSource::Folder { path }).map(Some)
 }
 
 /// Goes back to VSPE's startup configuration.
 #[tauri::command]
 pub async fn use_vspe_autostart(state: State<'_, AppState>) -> CmdResult<VspeView> {
-    {
-        let inventory = lock(&state.inventory);
-        inventory.store().delete_setting(vspe::SETTING_FILE)?;
-    }
-    Ok(vspe::view(None))
+    use_vspe_source(&state, VspeSource::Autostart)
 }
 
 #[tauri::command]

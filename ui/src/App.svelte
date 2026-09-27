@@ -9,6 +9,7 @@
   import ImportDialog from './components/ImportDialog.svelte';
   import Inspector from './components/Inspector.svelte';
   import MergeDialog from './components/MergeDialog.svelte';
+  import VspeDialog from './components/VspeDialog.svelte';
   import PortTable from './components/PortTable.svelte';
   import StatusBar from './components/StatusBar.svelte';
   import Toasts from './components/Toasts.svelte';
@@ -135,6 +136,7 @@
   {#if app.dialog === 'backups'}<BackupsDialog />{/if}
   {#if app.dialog === 'merge'}<MergeDialog />{/if}
   {#if app.dialog === 'confirm'}<ConfirmDialog />{/if}
+  {#if app.dialog === 'vspe'}<VspeDialog />{/if}
 </div>
 
 <style>

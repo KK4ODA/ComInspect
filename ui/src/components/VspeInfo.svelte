@@ -3,7 +3,8 @@
   import { isConnected } from '../lib/filters';
   import type { PortRow } from '../lib/types';
   import { holderNames } from '../lib/usage';
-  import { portList, splitterOf } from '../lib/vspe';
+  import { dateTime } from '../lib/format';
+  import { portList, sourceLabel, splitterOf } from '../lib/vspe';
 
   let { row }: { row: PortRow } = $props();
 
@@ -13,7 +14,8 @@
   const shared = $derived(key ? (app.links.sharedBy.get(key) ?? []) : []);
   const roles = $derived(key ? (app.links.roles.get(key) ?? []) : []);
   const file = $derived(app.vspe?.file ?? null);
-  const fileName = $derived(file?.split(/[\\/]/).pop() ?? null);
+  const label = $derived(app.vspe ? sourceLabel(app.vspe) : "VSPE's startup configuration");
+  const saved = $derived(app.vspe?.modifiedAt ? dateTime(app.vspe.modifiedAt) : null);
   const linked = $derived(!!split || shared.length > 0 || roles.length > 0);
 
   /** The row for a port, preferring a connected device. */
@@ -89,7 +91,10 @@
   {#if !file}
     <p class="line">ComInspect can show how this VSPE port is connected once it can read your VSPE configuration.</p>
   {:else if !app.vspe?.error}
-    <p class="line muted">This port isn't in {fileName}.</p>
+    <p class="line warn">
+      This port isn't in {label}{#if saved}, saved {saved}{/if}. If you set it up in VSPE since then, save the configuration
+      again in VSPE, or read a newer file.
+    </p>
   {/if}
 {/if}
 
@@ -100,17 +105,12 @@
 <div class="source">
   <span class="muted small" title={file ?? undefined}>
     {#if !file}
-      No VSPE startup configuration found.
-    {:else if app.vspe?.chosen}
-      From {fileName}
+      No VSPE configuration found.
     {:else}
-      From VSPE's startup configuration
+      From {label}{#if saved}, saved {saved}{/if}
     {/if}
   </span>
-  <button class="btn ghost small" onclick={() => app.chooseVspeFile()}>Choose file…</button>
-  {#if app.vspe?.chosen}
-    <button class="btn ghost small" onclick={() => app.useVspeAutostart()}>Use VSPE's startup configuration</button>
-  {/if}
+  <button class="btn ghost small" onclick={() => (app.dialog = 'vspe')}>Change…</button>
 </div>
 
 <style>

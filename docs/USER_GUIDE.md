@@ -226,17 +226,25 @@ WSJT-X, COM22 for N1MM Logger+). ComInspect reads VSPE's configuration and shows
 
 ### Where the information comes from
 
-ComInspect reads VSPE's configuration file and never starts, stops or changes VSPE.
+ComInspect reads a VSPE configuration file and never starts, stops or changes VSPE. Choose which
+file in **Menu → VSPE configuration…**, or with **Change…** in the VSPE section of the details panel:
 
-- **Automatically**, it reads VSPE's startup configuration, the one VSPE's service loads when
-  Windows starts: `%ProgramData%\Eterlogic\VSPE\autostart.vspe`. In VSPE 1.5 or later, create it
-  with **File → Save as autostart config**.
-- **To use another file**, for example one you load by hand, click **Choose file…** in the VSPE
-  section and pick the `.vspe` file. **Use VSPE's startup configuration** switches back.
+![The VSPE configuration dialog, reading the newest file in a folder](images/vspe-config.png)
 
-The file says what VSPE is set up to do. If you change devices in VSPE without saving, the tree shows
-the saved version until you save again. ComInspect reads the file again whenever its window becomes
-active.
+- **VSPE's startup configuration** (the default): the file VSPE's service loads when Windows starts,
+  `%ProgramData%\Eterlogic\VSPE\autostart.vspe`. In VSPE 1.5 or later, update it with
+  **File → Save as autostart config**. A normal **Save as** doesn't change it.
+- **The newest file in a folder:** for when you save a new `.vspe` file for every change, for example
+  `Shack_092726.vspe`. ComInspect uses whichever file in the folder you saved last.
+- **A specific file:** always the same file.
+
+The dialog shows which file ComInspect is reading, when it was saved and what's in it. The VSPE
+section also says which file and when it was saved.
+
+The file says what VSPE was set up to do when it was saved. If VSPE has virtual ports that aren't in
+the file, because you added a splitter and didn't save it where ComInspect reads, ComInspect says so:
+in the VSPE section of those ports, in the dialog, and with a count next to **VSPE configuration…**
+in the menu. ComInspect reads the file again whenever its window becomes active.
 
 ComInspect understands splitters (with several virtual ports, as in VSPE 1.5 and later, or one), and
 the documented settings of pairs, connectors, redirectors, TCP servers and clients and UDP devices.
@@ -248,6 +256,7 @@ From the command line:
 ```
 cominspect-cli vspe                          # VSPE's startup configuration
 cominspect-cli vspe C:\Users\ham\Shack.vspe  # another file
+cominspect-cli vspe C:\Users\ham\VSPE        # the newest .vspe file in a folder
 ```
 
 ---
