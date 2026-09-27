@@ -35,8 +35,9 @@ COMMANDS:
                                   start PROGRAM). Exits 2 on timeout (default 300 s,
                                   0 = no limit), 1 if the port disappears. Checks every
                                   MS milliseconds (default 500)
-    vspe [FILE] [--json]          Show the ports an Eterlogic VSPE configuration links (read-only);
-                                  without FILE, VSPE's startup configuration
+    vspe [FILE|FOLDER] [--json]   Show the ports an Eterlogic VSPE configuration links (read-only):
+                                  a .vspe file, the newest .vspe file in FOLDER, or
+                                  without either, VSPE's startup configuration
     test-open PORT                Check whether PORT can be opened (may toggle DTR/RTS!)
     cat PORT --protocol P [--baud N|auto] [--stop-bits 1|2] [--civ HEX]
                                   Send one read-only CAT query. P is one of:
@@ -372,10 +373,14 @@ fn cmd_who(args: &[String]) -> Result<(), String> {
 
 fn cmd_vspe(args: &[String]) -> Result<(), String> {
     use cominspect_platform::vspe;
-    let path = match positionals(args, &[]).into_iter().next() {
-        Some(file) => PathBuf::from(file),
+    let path = match positionals(args, &[]).into_iter().next().map(PathBuf::from) {
+        Some(folder) if folder.is_dir() => vspe::newest_config_in(&folder).ok_or(format!(
+            "there are no VSPE configuration files (.vspe) in {}",
+            folder.display()
+        ))?,
+        Some(file) => file,
         None => vspe::autostart_config().ok_or(
-            "VSPE's startup configuration (autostart.vspe) was not found; name a .vspe file",
+            "VSPE's startup configuration (autostart.vspe) was not found; name a .vspe file or folder",
         )?,
     };
     let devices = vspe::read_config(&path)?;

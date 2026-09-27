@@ -118,6 +118,7 @@ pub fn run() {
             commands::pick_program,
             commands::get_vspe,
             commands::choose_vspe_file,
+            commands::choose_vspe_folder,
             commands::use_vspe_autostart,
         ])
         .build(tauri::generate_context!())

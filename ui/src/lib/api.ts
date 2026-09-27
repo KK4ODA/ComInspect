@@ -76,6 +76,8 @@ export interface Backend {
   getVspe(): Promise<VspeView>;
   /** Picks a .vspe file to use; null when cancelled. */
   chooseVspeFile(): Promise<VspeView | null>;
+  /** Picks a folder whose newest .vspe file is used; null when cancelled. */
+  chooseVspeFolder(): Promise<VspeView | null>;
   /** Goes back to VSPE's startup configuration. */
   useVspeAutostart(): Promise<VspeView>;
   onUsageReleased(cb: (event: ReleasedEvent) => void): Promise<Unlisten>;

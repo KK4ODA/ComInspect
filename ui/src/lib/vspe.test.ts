@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { PortRow, VspeDevice } from './types';
-import { portList, splitterOf, treeRows, vspeLinks } from './vspe';
+import type { PortRow, VspeDevice, VspeView } from './types';
+import { describeDevice, missingFromConfig, portList, sourceLabel, splitterOf, treeRows, vspeLinks } from './vspe';
 
 let nextId = 1;
 function row(p: Partial<PortRow>): PortRow {
@@ -102,5 +102,51 @@ describe('VSPE links', () => {
     expect(portList(['COM8'])).toBe('COM8');
     expect(portList(['COM8', 'COM10'])).toBe('COM8 and COM10');
     expect(portList(['COM8', 'COM10', 'COM11'])).toBe('COM8, COM10 and COM11');
+  });
+});
+
+describe('VSPE configuration', () => {
+  const view = (partial: Partial<VspeView> = {}): VspeView => ({
+    source: { mode: 'autostart' },
+    autostartPath: 'C:\\ProgramData\\Eterlogic\\VSPE\\autostart.vspe',
+    file: 'C:\\ProgramData\\Eterlogic\\VSPE\\autostart.vspe',
+    devices,
+    error: null,
+    modifiedAt: 0,
+    ...partial,
+  });
+
+  it('describes every device', () => {
+    expect(devices.map(describeDevice)).toEqual([
+      'Splitter: COM5 shared as COM10 and COM8 (9600 baud)',
+      'Pair: COM21 ↔ COM22',
+      'TCP server: COM5 on port 5555',
+      'Bridge: not understood by ComInspect yet',
+    ]);
+  });
+
+  it('names connected VSPE ports the file does not mention', () => {
+    // A splitter added after the startup configuration was saved (COM18 -> COM26, COM27).
+    const rows = [
+      virt('COM8'),
+      virt('COM26'),
+      virt('COM27', { status: 'absent' }),
+      virt('COM30', { virtualProvider: 'com0com' }),
+      row({ port: 'COM18', transport: 'bluetooth' }),
+    ];
+    expect(missingFromConfig(rows, view())).toEqual(['COM26']);
+    expect(missingFromConfig(rows, view({ file: null }))).toEqual([]);
+    expect(missingFromConfig(rows, view({ error: 'unreadable' }))).toEqual([]);
+  });
+
+  it('says where the configuration comes from', () => {
+    expect(sourceLabel(view())).toBe("VSPE's startup configuration");
+    expect(sourceLabel(view({ source: { mode: 'file', path: 'C:\\VSPE\\Shack.vspe' }, file: 'C:\\VSPE\\Shack.vspe' }))).toBe('Shack.vspe');
+    expect(
+      sourceLabel(
+        view({ source: { mode: 'folder', path: 'C:\\Users\\ham\\VSPE' }, file: 'C:\\Users\\ham\\VSPE\\Lenovo_X1_092726.vspe' }),
+      ),
+    ).toBe('Lenovo_X1_092726.vspe (newest in VSPE)');
+    expect(sourceLabel(view({ source: { mode: 'folder', path: 'D:\\Radio' }, file: null }))).toBe('the newest file in Radio');
   });
 });

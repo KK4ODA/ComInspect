@@ -16,6 +16,7 @@ import type {
   Transport,
   UpdateStatus,
   UsageView,
+  VspeSource,
   VspeView,
 } from './types';
 
@@ -623,9 +624,18 @@ export function createMockBackend(): Backend {
       : { state: 'free', since: now - 3 * 3600_000, sinceExact: false, watch: null };
   }
   const programs = new Map<number, string>([[8, 'C:\\VarAC\\VarAC.exe']]);
-  const vspe: VspeView = {
-    file: 'C:\\ProgramData\\Eterlogic\\VSPE\\autostart.vspe',
-    chosen: false,
+  // VSPE: a splitter shares COM7; the demo can read it from any source.
+  const autostartPath = 'C:\\ProgramData\\Eterlogic\\VSPE\\autostart.vspe';
+  let vspeSource: VspeSource = { mode: 'autostart' };
+  const vspeView = (): VspeView => ({
+    source: vspeSource,
+    autostartPath,
+    file:
+      vspeSource.mode === 'autostart'
+        ? autostartPath
+        : vspeSource.mode === 'file'
+          ? vspeSource.path
+          : `${vspeSource.path}\\Shack_092726.vspe`,
     devices: [
       {
         kind: 'Splitter',
@@ -634,8 +644,8 @@ export function createMockBackend(): Backend {
       },
     ],
     error: null,
-    modifiedAt: now - 30 * DAY,
-  };
+    modifiedAt: vspeSource.mode === 'autostart' ? now - 30 * DAY : now - 2 * 3600_000,
+  });
   const usageView = (): UsageView => ({ ...structuredClone(usage), checkedAt: Date.now() });
   const emitUsage = () => {
     const v = usageView();
@@ -981,9 +991,19 @@ export function createMockBackend(): Backend {
       return delay(usageView());
     },
     getWatchProgram: (deviceId) => delay(programs.get(deviceId) ?? null),
-    getVspe: () => delay(vspe),
-    chooseVspeFile: () => delay({ ...vspe, chosen: true, file: 'C:\\Users\\ham\\Documents\\Shack.vspe' }, 200),
-    useVspeAutostart: () => delay(vspe),
+    getVspe: () => delay(vspeView()),
+    chooseVspeFile: () => {
+      vspeSource = { mode: 'file', path: 'C:\\Users\\ham\\Documents\\VSPE\\Shack.vspe' };
+      return delay(vspeView(), 200);
+    },
+    chooseVspeFolder: () => {
+      vspeSource = { mode: 'folder', path: 'C:\\Users\\ham\\Documents\\VSPE' };
+      return delay(vspeView(), 200);
+    },
+    useVspeAutostart: () => {
+      vspeSource = { mode: 'autostart' };
+      return delay(vspeView());
+    },
     pickProgram: () => delay('C:\\VarAC\\VarAC.exe', 200),
     onUsageUpdated: async (cb): Promise<Unlisten> => {
       usageListeners.add(cb);

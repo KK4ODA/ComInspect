@@ -60,6 +60,7 @@ export function createTauriBackend(): Backend {
     onUsageUpdated: (cb) => listen<UsageView>('usage://updated', (e) => cb(e.payload)),
     getVspe: () => invoke('get_vspe'),
     chooseVspeFile: () => invoke('choose_vspe_file'),
+    chooseVspeFolder: () => invoke('choose_vspe_folder'),
     useVspeAutostart: () => invoke('use_vspe_autostart'),
     onUsageReleased: (cb) => listen<ReleasedEvent>('usage://released', (e) => cb(e.payload)),
     onInventoryUpdated: (cb) => listen<InventoryView>('inventory://updated', (e) => cb(e.payload)),

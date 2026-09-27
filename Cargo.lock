@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "cominspect"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "cominspect-core",
  "cominspect-platform",
@@ -539,13 +539,14 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
 ]
 
 [[package]]
 name = "cominspect-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "cominspect-core",
  "cominspect-platform",
@@ -555,7 +556,7 @@ dependencies = [
 
 [[package]]
 name = "cominspect-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -565,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "cominspect-platform"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "cominspect-core",
  "core-foundation 0.10.1",
@@ -582,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "cominspect-store"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "cominspect-core",
  "log",
