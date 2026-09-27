@@ -5,6 +5,7 @@
   import { STATUS_TEXT, TRANSPORTS, purposeLabel } from '../lib/labels';
   import type { PortRow, PortUsageView } from '../lib/types';
   import { usageSummary } from '../lib/usage';
+  import { splitterOf } from '../lib/vspe';
   import Icon from './Icon.svelte';
 
   let { editTick = 0 }: { editTick?: number } = $props();
@@ -100,7 +101,8 @@
       </tr>
     </thead>
     <tbody>
-      {#each app.rows as row (row.deviceId)}
+      {#each app.tree as item (item.row.deviceId)}
+        {@const row = item.row}
         {@const connected = isConnected(row.status)}
         {@const usage = app.usageFor(row)}
         <tr
@@ -108,6 +110,7 @@
           class:selected={row.deviceId === app.selectedId}
           class:offline={!connected}
           class:ignored={row.ignored}
+          class:child={item.depth === 1}
           onclick={() => app.select(row.deviceId)}
           ondblclick={() => startEdit(row)}
           aria-selected={row.deviceId === app.selectedId}
@@ -123,6 +126,11 @@
             </span>
           </td>
           <td class="c-port">
+            {#if item.depth === 1}
+              <span class="branch" title={`Virtual port of a VSPE splitter that shares ${splitterOf(row, app.links)?.source}`}
+                >{item.last ? '└' : '├'}</span
+              >
+            {/if}
             <span class="port mono">{row.portShort ?? '—'}</span>
             {#if usage?.state === 'in_use'}
               {@const closing = !!usage.holders?.length && usage.holders.every((h) => h.exiting)}
@@ -330,6 +338,16 @@
   }
   tr.offline .port {
     font-weight: 500;
+  }
+  tr.child .c-port {
+    padding-left: 12px;
+  }
+  .branch {
+    display: inline-block;
+    width: 12px;
+    margin-right: 3px;
+    color: var(--muted);
+    font-family: var(--mono);
   }
   .usage {
     margin-left: 6px;

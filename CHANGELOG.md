@@ -5,6 +5,25 @@ All notable changes to ComInspect are documented here. The format is based on
 [Semantic Versioning](https://semver.org/). The release workflow publishes the
 section matching the tag as the release notes shown in the app.
 
+## [0.3.0] - 2026-09-27
+
+See how VSPE connects your ports.
+
+### Added
+
+- **VSPE splitters as a tree.** ComInspect reads the configuration of Eterlogic's Virtual Serial
+  Ports Emulator (VSPE) and shows each splitter's virtual ports under the port they share, in the
+  port list and in the details panel, together with the program on each of them. VSPE pairs,
+  connectors, redirectors and network devices are explained in the details panel too. ComInspect
+  reads VSPE's startup configuration automatically, or a `.vspe` file you choose, and never changes
+  VSPE.
+- `cominspect-cli vspe [FILE]` lists what a VSPE configuration connects.
+
+### Changed
+
+- Ports from known virtual-port software (VSPE, com0com, Eltima and others) are recognized as
+  virtual whatever bus Windows lists them on.
+
 ## [0.2.0] - 2026-09-27
 
 See which program has a port open, and get told when it lets go.

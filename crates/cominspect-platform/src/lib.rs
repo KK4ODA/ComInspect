@@ -10,6 +10,7 @@ pub mod diagnostics;
 pub mod launch;
 pub mod monitor;
 pub mod usage;
+pub mod vspe;
 
 #[cfg(target_os = "linux")]
 pub mod linux;

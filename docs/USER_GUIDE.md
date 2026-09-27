@@ -16,15 +16,16 @@ Contents:
 3. [Naming your ports](#naming-your-ports)
 4. [Finding out which port is which](#finding-out-which-port-is-which)
 5. [Which program is using a port](#which-program-is-using-a-port)
-6. [How ComInspect recognizes a device](#how-cominspect-recognizes-a-device)
-7. [Hidden ports and COM numbers on Windows](#hidden-ports-and-com-numbers-on-windows)
-8. [Warnings and notices](#warnings-and-notices)
-9. [Diagnostics](#diagnostics)
-10. [Search, filters and keyboard shortcuts](#search-filters-and-keyboard-shortcuts)
-11. [Moving to another computer: export and import](#moving-to-another-computer-export-and-import)
-12. [Your data and backups](#your-data-and-backups)
-13. [Updates](#updates)
-14. [Troubleshooting](#troubleshooting)
+6. [VSPE: shared and linked ports](#vspe-shared-and-linked-ports)
+7. [How ComInspect recognizes a device](#how-cominspect-recognizes-a-device)
+8. [Hidden ports and COM numbers on Windows](#hidden-ports-and-com-numbers-on-windows)
+9. [Warnings and notices](#warnings-and-notices)
+10. [Diagnostics](#diagnostics)
+11. [Search, filters and keyboard shortcuts](#search-filters-and-keyboard-shortcuts)
+12. [Moving to another computer: export and import](#moving-to-another-computer-export-and-import)
+13. [Your data and backups](#your-data-and-backups)
+14. [Updates](#updates)
+15. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -201,6 +202,52 @@ a batch file that switches from VARA FM to VarAC:
 ```bat
 taskkill /IM VARAFM.exe
 cominspect-cli wait-free COM4 --timeout 120 --then "C:\VarAC\VarAC.exe"
+```
+
+---
+
+## VSPE: shared and linked ports
+
+![A VSPE splitter sharing the FTDX10's CAT port as COM21 and COM22](images/vspe.png)
+
+Eterlogic's [Virtual Serial Ports Emulator](https://eterlogic.com/Products.VSPE.html) (VSPE)
+creates virtual serial ports and connects ports to each other. A **splitter**, for example, shares
+one port (say the radio's CAT port, COM7) with several programs through virtual ports (COM21 for
+WSJT-X, COM22 for N1MM Logger+). ComInspect reads VSPE's configuration and shows those links:
+
+- **In the port list**, a splitter's virtual ports appear right under the port they share, marked
+  with ├ and └. They stay there whatever column you sort by.
+- **In the details panel**, the **VSPE** section explains the port's role, with a button for every
+  linked port:
+  - on a shared port: *Shared by a VSPE splitter as COM21 and COM22*, with the program on each
+    virtual port and the baud rate VSPE uses
+  - on a splitter's virtual port: the port it shares, and its other virtual ports
+  - on a pair, connector, redirector or network port: what VSPE connects it to
+
+### Where the information comes from
+
+ComInspect reads VSPE's configuration file and never starts, stops or changes VSPE.
+
+- **Automatically**, it reads VSPE's startup configuration, the one VSPE's service loads when
+  Windows starts: `%ProgramData%\Eterlogic\VSPE\autostart.vspe`. In VSPE 1.5 or later, create it
+  with **File → Save as autostart config**.
+- **To use another file**, for example one you load by hand, click **Choose file…** in the VSPE
+  section and pick the `.vspe` file. **Use VSPE's startup configuration** switches back.
+
+The file says what VSPE is set up to do. If you change devices in VSPE without saving, the tree shows
+the saved version until you save again. ComInspect reads the file again whenever its window becomes
+active.
+
+ComInspect understands splitters (with several virtual ports, as in VSPE 1.5 and later, or one), and
+the documented settings of pairs, connectors, redirectors, TCP servers and clients and UDP devices.
+Other devices, such as Serial Router and Bridge, are recognized but not explained yet. The
+[issue tracker](https://github.com/KK4ODA/ComInspect/issues) welcomes a sample `.vspe` file.
+
+From the command line:
+
+```
+cominspect-cli vspe                          # VSPE's startup configuration
+cominspect-cli vspe C:\Users\ham\Shack.vspe  # another file
 ```
 
 ---

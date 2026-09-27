@@ -497,3 +497,32 @@ export interface ReleasedEvent {
   started: string | null;
   error: string | null;
 }
+
+// --- VSPE (Eterlogic Virtual Serial Ports Emulator) ---------------------------
+
+/** How a VSPE device connects ports. Port names are "COM<n>". */
+export type VspeLayout =
+  | { type: 'splitter'; source: string; ports: string[]; baud: number | null }
+  | { type: 'connector'; port: string }
+  | { type: 'pair'; ports: string[] }
+  | { type: 'redirector'; ports: string[] }
+  | { type: 'network'; port: string; protocol: string; address: string };
+
+export interface VspeDevice {
+  /** "Splitter", "Pair", "Connector" … */
+  kind: string;
+  /** The settings string as stored in the configuration file. */
+  settings: string;
+  /** Null when ComInspect doesn't understand the settings. */
+  layout: VspeLayout | null;
+}
+
+export interface VspeView {
+  /** The configuration file read, if any. */
+  file: string | null;
+  /** True when the user chose the file; false for VSPE's startup configuration. */
+  chosen: boolean;
+  devices: VspeDevice[];
+  error: string | null;
+  modifiedAt: number | null;
+}

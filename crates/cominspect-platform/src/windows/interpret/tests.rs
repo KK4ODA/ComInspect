@@ -494,3 +494,37 @@ fn comdb_and_conflicts() {
             .all(|p| com_number(&p.port_name) == Some(7))
     );
 }
+
+/// VSPE's ports sit on its own "Eterlogic Virtual Serial Bus". Whatever
+/// that bus is called, known virtual-port software is recognized as virtual,
+/// so the app can show how VSPE links the port.
+#[test]
+fn virtual_ports_on_an_unfamiliar_bus() {
+    let mut port = with_port(
+        node(r"VSPEBUS\PORT\1"),
+        "COM21",
+        "Eterlogic Virtual Serial Port",
+    );
+    port.manufacturer = Some("Eterlogic".into());
+    let mut bus = node(r"SWD\VSPE\0");
+    bus.enumerator = Some("VSPEBUS".into());
+    let unknown = with_port(node(r"MYSTERY\PORT\1"), "COM40", "Mystery Port");
+    let scan = scan_of(
+        vec![
+            RawPort {
+                node: port,
+                ancestors: vec![bus],
+            },
+            RawPort {
+                node: unknown,
+                ancestors: vec![],
+            },
+        ],
+        vec![],
+    );
+    let vspe = &scan.ports[0];
+    assert_eq!(vspe.transport, Transport::Virtual);
+    assert_eq!(vspe.virtual_port.as_ref().unwrap().provider, "VSPE");
+    // Unknown software on an unknown bus stays unknown.
+    assert_eq!(scan.ports[1].transport, Transport::Unknown);
+}

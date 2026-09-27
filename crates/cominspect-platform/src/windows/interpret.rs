@@ -278,17 +278,18 @@ pub fn classify(port: &RawPort, kernel_name: Option<&str>) -> Transport {
     {
         return Transport::Pci;
     }
+    // Known virtual-port software on a bus of its own (VSPE's "Eterlogic
+    // Virtual Serial Bus", for example).
+    if known_virtual_software(port, kernel_name).is_some() {
+        return Transport::Virtual;
+    }
     Transport::Unknown
 }
 
-/// Best guess of the software behind a virtual port, from the enumerator,
-/// kernel device name, driver provider, service and description.
-pub fn virtual_provider(port: &RawPort, kernel_name: Option<&str>) -> (String, bool) {
+/// The virtual-port software named by a port's kernel device name, driver
+/// provider, service or description, if it is one ComInspect knows.
+fn known_virtual_software(port: &RawPort, kernel_name: Option<&str>) -> Option<&'static str> {
     let node = &port.node;
-    let enumerator = enumerator_of(&node.instance_id);
-    if enumerator == "COM0COM" {
-        return ("com0com".into(), false);
-    }
     let haystack = [
         kernel_name.unwrap_or_default(),
         node.driver_provider.as_deref().unwrap_or_default(),
@@ -314,10 +315,22 @@ pub fn virtual_provider(port: &RawPort, kernel_name: Option<&str>) -> (String, b
         ),
         (&["n8vb", "vcom"], "N8VB vCOM"),
     ];
-    for (needles, name) in known {
-        if needles.iter().any(|n| haystack.contains(n)) {
-            return ((*name).to_string(), true);
-        }
+    known
+        .iter()
+        .find(|(needles, _)| needles.iter().any(|n| haystack.contains(n)))
+        .map(|(_, name)| *name)
+}
+
+/// Best guess of the software behind a virtual port, from the enumerator,
+/// kernel device name, driver provider, service and description.
+pub fn virtual_provider(port: &RawPort, kernel_name: Option<&str>) -> (String, bool) {
+    let node = &port.node;
+    let enumerator = enumerator_of(&node.instance_id);
+    if enumerator == "COM0COM" {
+        return ("com0com".into(), false);
+    }
+    if let Some(name) = known_virtual_software(port, kernel_name) {
+        return (name.to_string(), true);
     }
     let fallback = node
         .driver_provider

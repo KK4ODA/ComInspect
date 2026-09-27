@@ -6,6 +6,7 @@ mod lifecycle;
 mod state;
 mod updates;
 mod usage;
+mod vspe;
 
 use tauri::{Manager, RunEvent};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
@@ -115,6 +116,9 @@ pub fn run() {
             commands::unwatch_port,
             commands::get_watch_program,
             commands::pick_program,
+            commands::get_vspe,
+            commands::choose_vspe_file,
+            commands::use_vspe_autostart,
         ])
         .build(tauri::generate_context!())
         .expect("error while building ComInspect");

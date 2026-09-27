@@ -1,4 +1,5 @@
 import { errorMessage, getBackend, type Backend, type Unlisten } from './api';
+import { treeRows, vspeLinks, type PortLinks, type TreeRow } from './vspe';
 import {
   applyFilters,
   type Filters,
@@ -20,6 +21,7 @@ import type {
   UiPrefs,
   UpdateStatus,
   UsageView,
+  VspeView,
 } from './types';
 
 export interface Toast {
@@ -73,6 +75,7 @@ class AppStore {
   appInfo = $state<AppInfo | null>(null);
   update = $state<UpdateStatus | null>(null);
   usage = $state<UsageView | null>(null);
+  vspe = $state<VspeView | null>(null);
   collapsed = $state<Record<string, boolean>>({ system: true, recognition: true, diagnostics: true });
   dismissedBanners = $state<string[]>([]);
   now = $state(Date.now());
@@ -85,6 +88,10 @@ class AppStore {
     showIgnored: this.showIgnored,
   });
   rows: PortRow[] = $derived(this.view ? applyFilters(this.view.rows, this.filters, this.sort) : []);
+  /** How VSPE links ports (from its configuration file). */
+  links: PortLinks = $derived(vspeLinks(this.vspe?.devices ?? []));
+  /** `rows` in display order: VSPE Splitter ports under the port they share. */
+  tree: TreeRow[] = $derived(treeRows(this.rows, this.links));
   selectedRow: PortRow | null = $derived(
     this.view?.rows.find((r) => r.deviceId === this.selectedId) ?? null,
   );
@@ -126,6 +133,9 @@ class AppStore {
         }),
       );
       this.usage = await b.getPortUsage().catch(() => null);
+      await this.loadVspe();
+      // VSPE's configuration may have changed while ComInspect was in the background.
+      window.addEventListener('focus', this.onFocus);
       this.timer = setInterval(() => (this.now = Date.now()), 30_000);
 
       if (info?.startup.updatedFrom) {
@@ -146,6 +156,7 @@ class AppStore {
     this.unlisten.forEach((u) => u());
     this.unlisten = [];
     if (this.timer) clearInterval(this.timer);
+    window.removeEventListener('focus', this.onFocus);
   }
 
   private applyPrefs(prefs: UiPrefs | null): void {
@@ -203,10 +214,40 @@ class AppStore {
   }
 
   moveSelection(delta: number): void {
-    if (!this.rows.length) return;
-    const index = this.rows.findIndex((r) => r.deviceId === this.selectedId);
-    const next = index < 0 ? 0 : Math.max(0, Math.min(this.rows.length - 1, index + delta));
-    this.select(this.rows[next].deviceId);
+    const rows = this.tree;
+    if (!rows.length) return;
+    const index = rows.findIndex((t) => t.row.deviceId === this.selectedId);
+    const next = index < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, index + delta));
+    this.select(rows[next].row.deviceId);
+  }
+
+  // --- VSPE ---------------------------------------------------------------------
+
+  private onFocus = () => void this.loadVspe();
+
+  async loadVspe(): Promise<void> {
+    if (!this.backend) return;
+    this.vspe = await this.backend.getVspe().catch(() => this.vspe);
+  }
+
+  /** Lets the user pick the .vspe file to show. */
+  async chooseVspeFile(): Promise<void> {
+    if (!this.backend) return;
+    try {
+      const view = await this.backend.chooseVspeFile();
+      if (view) this.vspe = view;
+    } catch (e) {
+      this.error('Could not use that file', e);
+    }
+  }
+
+  async useVspeAutostart(): Promise<void> {
+    if (!this.backend) return;
+    try {
+      this.vspe = await this.backend.useVspeAutostart();
+    } catch (e) {
+      this.error("Could not read VSPE's startup configuration", e);
+    }
   }
 
   // --- filters & sorting -------------------------------------------------------

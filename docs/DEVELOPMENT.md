@@ -88,6 +88,7 @@ npm test                             # front-end unit tests
   - device hints
   - scan analysis
   - the export format
+  - VSPE configuration files, including one saved by VSPE 1.5 (`tests/data/splitters.vspe`)
 - **`cominspect-store`:**
   - the device lifecycle: new, disconnected, reconnected on another port, merged, forgotten
   - migrations and newer-schema handling

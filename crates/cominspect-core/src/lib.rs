@@ -9,6 +9,7 @@
 //! * [`user`] — user-assigned identity (nickname, purpose, CAT status …).
 //! * [`export`] — the portable `serial-port-inventory.json` format.
 //! * [`usage`] — which programs have a port open.
+//! * [`vspe`] — Eterlogic VSPE configuration files (virtual port links).
 //!
 //! This crate performs no I/O and has no operating-system dependencies.
 
@@ -20,5 +21,6 @@ pub mod model;
 pub mod time;
 pub mod usage;
 pub mod user;
+pub mod vspe;
 
 pub use model::{DiscoveredPort, Presence, ScanResult, Transport};

@@ -10,6 +10,8 @@
   import KV from './KV.svelte';
   import PortUsage from './PortUsage.svelte';
   import Section from './Section.svelte';
+  import VspeInfo from './VspeInfo.svelte';
+  import { splitterOf } from '../lib/vspe';
 
   const row = $derived(app.selectedRow);
   const detail = $derived(app.detail && app.detail.row.deviceId === app.selectedId ? app.detail : null);
@@ -20,6 +22,14 @@
   const notes = $derived((detail?.findings ?? []).filter((f) => f.severity === 'info'));
   const isWindows = $derived(app.view?.scan?.platform === 'windows');
   const usage = $derived(app.usageFor(row));
+  const portKey = $derived(row?.port?.toUpperCase() ?? '');
+  const vspeBadge = $derived.by(() => {
+    if (!row) return null;
+    if (splitterOf(row, app.links) || app.links.sharedBy.has(portKey)) return 'splitter';
+    const role = app.links.roles.get(portKey)?.[0];
+    if (role) return role.kind === 'network' ? 'network' : role.kind;
+    return row.virtualProvider === 'VSPE' ? '' : null;
+  });
   const usageBadge = $derived(
     usage?.watch ? 'waiting' : usage?.state === 'in_use' ? 'in use' : usage?.state === 'free' ? 'free' : null,
   );
@@ -86,6 +96,12 @@
       {#if app.usage && isConnected(row.status)}
         <Section key="usage" title="Programs using this port" badge={usageBadge}>
           <PortUsage {row} />
+        </Section>
+      {/if}
+
+      {#if vspeBadge !== null}
+        <Section key="vspe" title="VSPE" badge={vspeBadge}>
+          <VspeInfo {row} />
         </Section>
       {/if}
 

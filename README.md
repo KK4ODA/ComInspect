@@ -51,6 +51,9 @@ socket. It then shows which port that device has today.
 - **Which program has the port.** See which program is using each port, for example *COM4 — in
   use by VARA FM*, without ComInspect opening it. Ask to be notified when the port is free, and
   optionally have ComInspect start the next program, such as VarAC, the moment it is.
+- **VSPE splitters as a tree.** If you share ports with Eterlogic's Virtual Serial Ports Emulator
+  (VSPE), each splitter's virtual ports appear under the port they share, with the program on each
+  one. ComInspect reads VSPE's configuration and never changes it.
 - **Live updates.** The list changes as soon as you plug in or remove a device.
 - **Search and filters.** Filter by connected, disconnected, USB, Bluetooth, virtual, CAT, PTT,
   KISS or unknown. You can also search across names, hardware IDs and notes.
@@ -156,6 +159,7 @@ from a terminal. You can also build it from source (see [Development](docs/DEVEL
 cominspect-cli list               # every serial port, with details (never opens a port)
 cominspect-cli who                # which programs are using each port (never opens a port)
 cominspect-cli wait-free COM4 --then "C:\VarAC\VarAC.exe"   # start VarAC once COM4 is free
+cominspect-cli vspe               # what your VSPE configuration connects
 cominspect-cli watch              # print arrivals and removals as they happen
 cominspect-cli inventory          # the app's device list, with your names
 cominspect-cli export --out FILE  # export port mappings
@@ -177,7 +181,7 @@ is quarantined; allow it with `xattr -d com.apple.quarantine cominspect-cli`.
 
 ## Status
 
-ComInspect is an early preview (version 0.2). Windows 10 and 11 are the main platforms, and Linux
+ComInspect is an early preview (version 0.3). Windows 10 and 11 are the main platforms, and Linux
 and macOS are supported too. Please report problems and devices that ComInspect doesn't recognize
 on the [issue tracker](https://github.com/KK4ODA/ComInspect/issues). To help, attach the output of
 `cominspect-cli list --json` or the log file (**Menu → Open log folder**).
