@@ -22,6 +22,7 @@ edition = "2024"
 rust-version = "1.88"
 authors = ["KK4ODA"]
 repository = "https://github.com/KK4ODA/ComInspect"
+license = "MIT"
 publish = false
 
 [workspace.dependencies]
