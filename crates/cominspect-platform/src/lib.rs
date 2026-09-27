@@ -7,7 +7,9 @@
 
 pub mod cat;
 pub mod diagnostics;
+pub mod launch;
 pub mod monitor;
+pub mod usage;
 
 #[cfg(target_os = "linux")]
 pub mod linux;

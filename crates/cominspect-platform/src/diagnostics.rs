@@ -89,7 +89,8 @@ pub struct OpenTestReport {
     pub outcome: OpenOutcome,
     pub message: String,
     pub lines: Option<ModemLines>,
-    /// Processes known to hold the port open (Linux, same user only).
+    /// Processes known to hold the port open (only those the current user
+    /// may inspect).
     pub users: Vec<ProcessUsage>,
     pub elapsed_ms: u64,
 }
@@ -249,8 +250,8 @@ fn in_use_message(port: &str) -> Option<String> {
 }
 
 /// Checks whether a port can be opened and reports the modem status lines.
-/// On Linux, processes that already hold the port are detected *without*
-/// opening it.
+/// Programs that already hold the port are detected first, *without*
+/// opening it, and the port is then left alone.
 pub fn open_test(port: &str) -> OpenTestReport {
     let started = Instant::now();
     let users = port_users(port);
@@ -504,50 +505,18 @@ pub fn ptt_test(port: &str, line: ControlLine, duration: Duration) -> PttTestRep
     }
 }
 
-/// Processes holding a device node open (Linux; only processes the current
-/// user may inspect are visible).
-#[cfg(target_os = "linux")]
+/// Processes holding the port open, found without opening it (see
+/// [`crate::usage`]; only processes the current user may inspect are
+/// visible).
 pub fn port_users(port: &str) -> Vec<ProcessUsage> {
-    use std::path::Path;
-    let Ok(target) = std::fs::canonicalize(port) else {
-        return Vec::new();
-    };
-    let mut users = Vec::new();
-    let Ok(procs) = std::fs::read_dir("/proc") else {
-        return users;
-    };
-    let me = std::process::id();
-    for entry in procs.flatten() {
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|s| s.parse::<u32>().ok())
-        else {
-            continue;
-        };
-        if pid == me {
-            continue;
-        }
-        let Ok(fds) = std::fs::read_dir(entry.path().join("fd")) else {
-            continue;
-        };
-        let holds = fds
-            .flatten()
-            .any(|fd| std::fs::read_link(fd.path()).is_ok_and(|t| t == target));
-        if holds {
-            let name =
-                std::fs::read_to_string(Path::new("/proc").join(pid.to_string()).join("comm"))
-                    .map(|s| s.trim().to_string())
-                    .unwrap_or_else(|_| "unknown".into());
-            users.push(ProcessUsage { pid, name });
-        }
-    }
-    users
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn port_users(_port: &str) -> Vec<ProcessUsage> {
-    Vec::new()
+    crate::usage::port_usage(port)
+        .holders()
+        .iter()
+        .map(|h| ProcessUsage {
+            pid: h.pid,
+            name: h.display_name(),
+        })
+        .collect()
 }
 
 #[cfg(test)]

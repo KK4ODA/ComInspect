@@ -42,6 +42,14 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy (libraries and CLI)
         run: cargo clippy --all-targets --locked -- -D warnings
+      # Lets the Windows port-usage test hold a real serial port open.
+      - name: Find a serial port for tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $port = [System.IO.Ports.SerialPort]::GetPortNames() | Sort-Object | Select-Object -First 1
+          if ($port) { "COMINSPECT_TEST_PORT=$port" | Out-File -FilePath $env:GITHUB_ENV -Append; "Using $port" }
+          else { "No serial port on this runner" }
       - name: Unit tests
         if: ${{ !cancelled() }}
         run: cargo test --locked
