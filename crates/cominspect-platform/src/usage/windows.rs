@@ -846,6 +846,14 @@ fn is_elevated() -> bool {
 mod tests {
     use super::*;
 
+    /// The serial port named by `COMINSPECT_TEST_PORT` (`COM2` in CI). Tests
+    /// that open it take turns, since a port can be open in only one place.
+    fn test_port() -> Option<(String, std::sync::MutexGuard<'static, ()>)> {
+        static TURN: Mutex<()> = Mutex::new(());
+        let port = std::env::var("COMINSPECT_TEST_PORT").ok()?;
+        Some((port, TURN.lock().unwrap_or_else(|e| e.into_inner())))
+    }
+
     #[test]
     fn handle_entry_layout_matches_the_kernel() {
         assert_eq!(
@@ -886,7 +894,7 @@ mod tests {
         use windows_sys::Win32::Devices::Communication::{COMMTIMEOUTS, SetCommTimeouts};
         use windows_sys::Win32::Storage::FileSystem::ReadFile;
         use windows_sys::Win32::System::IO::CancelSynchronousIo;
-        let Ok(port) = std::env::var("COMINSPECT_TEST_PORT") else {
+        let Some((port, _turn)) = test_port() else {
             eprintln!("COMINSPECT_TEST_PORT not set; skipping");
             return;
         };
@@ -962,7 +970,7 @@ mod tests {
     #[test]
     fn detects_this_process_holding_a_port() {
         use std::os::windows::fs::OpenOptionsExt;
-        let Ok(port) = std::env::var("COMINSPECT_TEST_PORT") else {
+        let Some((port, _turn)) = test_port() else {
             eprintln!("COMINSPECT_TEST_PORT not set; skipping");
             return;
         };
