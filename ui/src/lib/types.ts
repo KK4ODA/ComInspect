@@ -451,3 +451,49 @@ export interface UiPrefs {
   inspectorWidth?: number;
   collapsed?: Record<string, boolean>;
 }
+
+// --- port usage ------------------------------------------------------------
+
+/** A program that has a port open. */
+export interface PortHolder {
+  pid: number;
+  /** Executable file name, e.g. "VARAFM.exe". */
+  processName: string;
+  executable: string | null;
+  /** Human-readable program name, e.g. "VARA FM". */
+  description: string | null;
+  /** The program is shutting down and still closing its handles. */
+  exiting?: boolean;
+}
+
+export type PortUsageState = 'free' | 'in_use' | 'unknown';
+
+export interface PortUsageView {
+  state: PortUsageState;
+  /** Present when state is "in_use". */
+  holders?: PortHolder[];
+  /** Present when state is "unknown". */
+  reason?: string;
+  /** When the port was first seen in this state (ms since the epoch). */
+  since: number;
+  /** False when the change happened at `since` or earlier. */
+  sinceExact: boolean;
+  /** Set while the user waits for the port to be released. */
+  watch: { armedAt: number; thenOpen: string | null } | null;
+}
+
+export interface UsageView {
+  /** Keyed by port name. */
+  ports: Record<string, PortUsageView>;
+  /** What the check cannot see (e.g. programs running as administrator). */
+  limitation: string | null;
+  checkedAt: number | null;
+}
+
+/** A watched port was released (or disappeared). */
+export interface ReleasedEvent {
+  port: string;
+  message: string;
+  started: string | null;
+  error: string | null;
+}

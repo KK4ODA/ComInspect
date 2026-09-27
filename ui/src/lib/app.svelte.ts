@@ -16,8 +16,10 @@ import type {
   InventoryEvent,
   InventoryView,
   PortRow,
+  PortUsageView,
   UiPrefs,
   UpdateStatus,
+  UsageView,
 } from './types';
 
 export interface Toast {
@@ -70,6 +72,7 @@ class AppStore {
 
   appInfo = $state<AppInfo | null>(null);
   update = $state<UpdateStatus | null>(null);
+  usage = $state<UsageView | null>(null);
   collapsed = $state<Record<string, boolean>>({ system: true, recognition: true, diagnostics: true });
   dismissedBanners = $state<string[]>([]);
   now = $state(Date.now());
@@ -116,7 +119,13 @@ class AppStore {
         await b.onInventoryUpdated((v) => this.applyView(v)),
         await b.onInventoryEvents((events) => this.announce(events)),
         await b.onUpdateStatus((s) => (this.update = s)),
+        await b.onUsageUpdated((u) => (this.usage = u)),
+        await b.onUsageReleased((e) => {
+          if (e.error) this.toast('warning', `${e.port} is free`, e.message);
+          else this.toast('success', `${e.port} is free`, e.message);
+        }),
       );
+      this.usage = await b.getPortUsage().catch(() => null);
       this.timer = setInterval(() => (this.now = Date.now()), 30_000);
 
       if (info?.startup.updatedFrom) {
@@ -345,6 +354,47 @@ class AppStore {
       });
     } catch (e) {
       this.error('The update was not installed', e);
+    }
+  }
+
+  // --- port usage -----------------------------------------------------------------
+
+  /** Which programs have the row's port open (connected ports only). */
+  usageFor(row: PortRow | null | undefined): PortUsageView | null {
+    if (!row?.port || !(row.status === 'connected' || row.status === 'problem')) return null;
+    return this.usage?.ports[row.port] ?? null;
+  }
+
+  async watchPort(row: PortRow, thenOpen: string | null): Promise<void> {
+    if (!this.backend || !row.port) return;
+    try {
+      this.usage = await this.backend.watchPort(row.port, row.deviceId, thenOpen);
+    } catch (e) {
+      this.error(`Could not watch ${row.port}`, e);
+    }
+  }
+
+  async unwatchPort(port: string): Promise<void> {
+    if (!this.backend) return;
+    try {
+      this.usage = await this.backend.unwatchPort(port);
+    } catch (e) {
+      this.error(`Could not stop watching ${port}`, e);
+    }
+  }
+
+  /** The program last chosen to start when this device's port is free. */
+  async watchProgram(deviceId: number): Promise<string | null> {
+    return (await this.backend?.getWatchProgram(deviceId).catch(() => null)) ?? null;
+  }
+
+  async pickProgram(): Promise<string | null> {
+    if (!this.backend) return null;
+    try {
+      return await this.backend.pickProgram();
+    } catch (e) {
+      this.error('Could not choose a program', e);
+      return null;
     }
   }
 
