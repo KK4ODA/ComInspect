@@ -85,7 +85,11 @@ socket. It then shows which port that device has today.
   </tr>
 </table>
 
-*The screenshots use ComInspect's built-in demo data.*
+*The screenshots above use ComInspect's built-in demo data. Below, ComInspect on a real station:
+VSPE splitters share a GPS receiver (COM3) and a Kenwood TM-D710 (COM10) with Graywolf, RMS Express
+and VarAC.*
+
+<img alt="ComInspect on a real station: a GPS receiver on COM3 shared by a VSPE splitter as COM20, COM21 and COM22, and a Kenwood TM-D710 on COM10 shared as COM15 and COM16, alongside two IC-9700 ports, an FTDX10 and Bluetooth ports" src="docs/images/real-station.png">
 
 ## Install
 
