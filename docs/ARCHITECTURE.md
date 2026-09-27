@@ -29,6 +29,7 @@ that ships in this repository and marks any part that is deferred.
 9. [Update and release architecture](#9-update-and-release-architecture)
 10. [Major technical risks](#10-major-technical-risks)
 11. [MVP scope](#11-mvp-scope)
+12. [Which program has a port open (v0.2)](#12-which-program-has-a-port-open-v02)
 
 ---
 
@@ -733,3 +734,55 @@ signing. Signing only removes SmartScreen and Gatekeeper warnings.
 * IOKit notification-based monitoring on macOS (v1 polls).
 * Linux: reading Bluetooth device names from BlueZ over D-Bus (v1 shows the address).
 * Nightly update channel publishing.
+
+---
+
+## 12. Which program has a port open (v0.2)
+
+A busy port is a common problem in a station: only one program can open it, and some programs hold
+it for a while after they close (VARA FM can keep a Digirig's port for up to a minute, so VarAC
+can't open it yet). Operators need to know *which* program has the port and *when* it lets go.
+
+Opening the port to find out is not an option. It can key a transmitter through RTS or DTR, and it
+races with the program that is about to use the port. ComInspect therefore reads usage from the
+operating system and never opens the port for it (`cominspect-platform/src/usage/`).
+
+| OS | Mechanism |
+|---|---|
+| Windows | `QueryDosDevice("COM4")` names the device behind the port (`\Device\Silabser0`). `NtQuerySystemInformation(SystemExtendedHandleInformation)` lists every open handle. File handles with read or write access, in processes the user may inspect, are duplicated into ComInspect and named with `NtQueryObject(ObjectNameInformation)`. A handle named like the device belongs to a program using the port. Duplicating a handle doesn't call the serial driver, so the port's lines never change. |
+| Linux | The `/proc/<pid>/fd/*` links, compared with the port's canonical path |
+| macOS | `libproc`: `proc_pidinfo(PROC_PIDLISTFDS)` and `proc_pidfdinfo(PROC_PIDFDVNODEPATHINFO)`, matching both the `/dev/cu.*` and `/dev/tty.*` names of a port |
+
+On Windows, getting the answer right needs care:
+
+- **Stalled name queries.** Naming a handle that was opened for synchronous I/O waits while another
+  thread of its program is inside synchronous I/O on it (a blocked pipe read, for example), possibly
+  forever. Queries therefore run on a worker thread. After 100 ms, the duplicate is closed at once
+  so that ComInspect never keeps anyone's port open, a new worker continues, and the late answer is
+  used by a later check. At most 64 workers may be stuck at a time.
+- **Handle reuse.** A closed handle's value, and even its kernel object address, is often reused by
+  the next file the program opens. Answers are cached per handle for 10 to 19 checks, but the
+  handles that named a port are read again at every check.
+- **Releases.** Before a port is reported free, its previous holders are read again without the
+  cache. If a holder opened a handle after it was last seen with the port, and that handle's name
+  can't be read yet, it may have reopened the port; the port stays "in use" for up to 15 s. Handles
+  the holder already had while it held the port don't count, because a port can be open only once.
+- **Programs shutting down.** Windows removes a handle from the table before the driver has finished
+  closing it (pending USB I/O can take a while). A previous holder that is exiting (it has an exit
+  code but still has handles) therefore keeps the port until it is done. The UI shows it as
+  *shutting down*.
+- **Visibility.** Without elevation, processes running elevated or as another user can't be
+  inspected. The UI says so.
+
+A real COM port in CI (`COMINSPECT_TEST_PORT=COM2` on the Windows runner) covers detection, release,
+handle reuse, immediate reopening and a blocked synchronous read. A cross-process smoke test holds a
+port from PowerShell (Windows) or Python (Linux, macOS) and checks `cominspect-cli who` and
+`wait-free`.
+
+**In the app** (`src-tauri/src/usage.rs`), a background thread checks the connected ports every
+2 s while the window is visible and every 1 s while someone waits for a port, and never otherwise.
+It emits `usage://updated`. When a watched port is free, it shows a notification
+(tauri-plugin-notification) and starts the chosen program: `ShellExecuteW` on Windows, so that
+shortcuts work, with the program's own folder as the working directory. The program is remembered
+per device in the settings table (`usage.program.<device id>`), and closing the window while waiting
+asks first. **The CLI** commands `who` and `wait-free` use the same probe.

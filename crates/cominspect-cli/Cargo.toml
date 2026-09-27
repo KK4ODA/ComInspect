@@ -1,6 +1,6 @@
 [package]
 name = "cominspect-cli"
-description = "Command-line serial port inventory (diagnostics and CI smoke tests)"
+description = "ComInspect command-line tool: serial port inventory, which programs use a port, and waiting for a port to be free"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

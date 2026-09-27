@@ -18,16 +18,19 @@ git tag v1.2.3 && git push origin v1.2.3
                    macOS Intel, Linux x64; Linux ARM64 optional):
                    unit tests, then tauri-action builds the installers,
                    signs the update files and uploads everything, including
-                   latest.json, to the draft
-       3. publish  verifies latest.json (every platform present and signed),
-                   publishes the release and refreshes the beta feed
+                   latest.json, to the draft; then the command-line tool
+                   is built and uploaded as cominspect-cli-<version>-<os>-<arch>
+       3. publish  verifies latest.json (every platform present and signed)
+                   and that the command-line tool is there for every
+                   platform, publishes the release and refreshes the beta feed
 ```
 
 - **Why a draft first.** Installed apps read the stable feed from
   `https://github.com/KK4ODA/ComInspect/releases/latest/download/latest.json`. That URL only
   follows *published* releases, so users never see a half-uploaded one.
-- **Release notes.** The `CHANGELOG.md` section for the version becomes the release notes shown in
-  the app's update dialog.
+- **Release notes.** The `CHANGELOG.md` section for the version becomes the GitHub release notes.
+  A plain-text copy (Markdown marks removed, wrapped lines joined) goes into `latest.json`, where
+  the app's update dialog shows it as *What's new*.
 
 ## One-time setup
 

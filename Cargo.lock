@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "cominspect"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cominspect-core",
  "cominspect-platform",
@@ -545,7 +545,7 @@ dependencies = [
 
 [[package]]
 name = "cominspect-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cominspect-core",
  "cominspect-platform",
@@ -555,7 +555,7 @@ dependencies = [
 
 [[package]]
 name = "cominspect-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -565,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "cominspect-platform"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cominspect-core",
  "core-foundation 0.10.1",
@@ -582,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "cominspect-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cominspect-core",
  "log",

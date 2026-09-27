@@ -30,10 +30,11 @@ COMMANDS:
     db-path                       Print the default database location
     who [PORT...] [--json]        Show which programs have ports open (never opens a port);
                                   without PORT, every connected port
-    wait-free PORT [--timeout SECS] [--then PROGRAM]
+    wait-free PORT [--timeout SECS] [--then PROGRAM] [--interval MS] [--quiet]
                                   Wait until no program has PORT open, then exit 0 (or
                                   start PROGRAM). Exits 2 on timeout (default 300 s,
-                                  0 = no limit), 1 if the port disappears
+                                  0 = no limit), 1 if the port disappears. Checks every
+                                  MS milliseconds (default 500)
     test-open PORT                Check whether PORT can be opened (may toggle DTR/RTS!)
     cat PORT --protocol P [--baud N|auto] [--stop-bits 1|2] [--civ HEX]
                                   Send one read-only CAT query. P is one of:

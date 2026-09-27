@@ -19,6 +19,9 @@ import type {
 } from './types';
 
 const DAY = 86_400_000;
+/** The demo runs this version and always offers the next minor one. */
+const APP_VERSION = __APP_VERSION__;
+const NEXT_VERSION = APP_VERSION.replace(/^(\d+)\.(\d+)\..*$/, (_, major: string, minor: string) => `${major}.${Number(minor) + 1}.0`);
 const now = Date.now();
 
 interface MockDevice {
@@ -535,7 +538,7 @@ export function createMockBackend(): Backend {
     update: new Set<(s: UpdateStatus) => void>(),
   };
   let update: UpdateStatus = {
-    currentVersion: '0.1.0',
+    currentVersion: APP_VERSION,
     configured: true,
     supported: true,
     phase: 'idle',
@@ -743,7 +746,7 @@ export function createMockBackend(): Backend {
   };
 
   const appInfo = (): AppInfo => ({
-    version: '0.1.0',
+    version: APP_VERSION,
     platform: 'windows',
     arch: 'x86_64',
     identifier: 'io.github.kk4oda.cominspect',
@@ -759,7 +762,7 @@ export function createMockBackend(): Backend {
     databaseBackup: null,
     recoveredFile: null,
     migrationsApplied: [],
-    startup: { version: '0.1.0', updatedFrom: null, firstRun: false, recovery: null, previousVersion: null },
+    startup: { version: APP_VERSION, updatedFrom: null, firstRun: false, recovery: null, previousVersion: null },
     repository: 'https://github.com/KK4ODA/ComInspect',
     updates: update,
   });
@@ -811,7 +814,7 @@ export function createMockBackend(): Backend {
         phase: 'available',
         lastChecked: Date.now(),
         available: {
-          version: '0.2.0',
+          version: NEXT_VERSION,
           date: new Date(now - DAY).toISOString(),
           notes: '- Improved Bluetooth port identification\n- Added CAT-port labels for more Yaesu radios\n- Fixed device matching for FTDI dual-channel interfaces',
           manualInstall: null,
