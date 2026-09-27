@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_notification::NotificationExt;
 
 use cominspect_core::time::now_ms;
@@ -198,6 +199,53 @@ impl UsageState {
     pub fn refresh(&self) {
         self.poke();
     }
+
+    /// Ports someone is waiting for, sorted.
+    fn watched_ports(&self) -> Vec<String> {
+        let mut ports: Vec<String> = lock(&self.inner).watches.keys().cloned().collect();
+        ports.sort();
+        ports
+    }
+}
+
+/// Closing the window ends every wait for a port, so ask first. Returns true
+/// when the close has to wait for the answer.
+pub fn ask_before_close(window: &tauri::Window) -> bool {
+    let app = window.app_handle();
+    let Some(state) = app.try_state::<AppState>() else {
+        return false;
+    };
+    let ports = state.usage.watched_ports();
+    let list = match ports.as_slice() {
+        [] => return false,
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    };
+    let handle = app.clone();
+    let label = window.label().to_string();
+    app.dialog()
+        .message(format!(
+            "ComInspect is waiting for {list} to be free. If you close it, you will not be \
+             notified and no program will be started."
+        ))
+        .title("Stop waiting?")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Close anyway".into(),
+            "Keep waiting".into(),
+        ))
+        .show(move |close| {
+            if !close {
+                return;
+            }
+            if let Some(state) = handle.try_state::<AppState>() {
+                lock(&state.usage.inner).watches.clear();
+            }
+            if let Some(window) = handle.get_webview_window(&label) {
+                let _ = window.close();
+            }
+        });
+    true
 }
 
 fn name_with_port(label: &str, port: &str) -> String {

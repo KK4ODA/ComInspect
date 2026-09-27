@@ -56,13 +56,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
-        .on_window_event(|window, event| {
+        .on_window_event(|window, event| match event {
             // Show fresh "in use by" information when the user comes back.
-            if let tauri::WindowEvent::Focused(true) = event
-                && let Some(state) = window.app_handle().try_state::<state::AppState>()
-            {
-                state.usage.refresh();
+            tauri::WindowEvent::Focused(true) => {
+                if let Some(state) = window.app_handle().try_state::<state::AppState>() {
+                    state.usage.refresh();
+                }
             }
+            // Closing ends any wait for a port to be free: ask first.
+            tauri::WindowEvent::CloseRequested { api, .. } if usage::ask_before_close(window) => {
+                api.prevent_close();
+            }
+            _ => {}
         })
         .setup(|app| {
             #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
