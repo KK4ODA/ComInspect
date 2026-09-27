@@ -169,3 +169,7 @@ ComInspect is an early preview (version 0.1). Windows 10 and 11 are the main pla
 and macOS are supported too. Please report problems and devices that ComInspect doesn't recognize
 on the [issue tracker](https://github.com/KK4ODA/ComInspect/issues). To help, attach the output of
 `cominspect-cli list --json` or the log file (**Menu → Open log folder**).
+
+## License
+
+ComInspect is free software under the [MIT License](LICENSE).

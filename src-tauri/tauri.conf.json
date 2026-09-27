@@ -30,6 +30,8 @@
     "targets": "all",
     "createUpdaterArtifacts": false,
     "publisher": "KK4ODA",
+    "copyright": "Copyright (c) 2026 KK4ODA",
+    "license": "MIT",
     "homepage": "https://github.com/KK4ODA/ComInspect",
     "category": "Utility",
     "shortDescription": "Serial port inventory and identity manager for amateur radio",

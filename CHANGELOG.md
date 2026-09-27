@@ -5,7 +5,7 @@ All notable changes to ComInspect are documented here. The format is based on
 [Semantic Versioning](https://semver.org/). The release workflow publishes the
 section matching the tag as the release notes shown in the app.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-09-27
 
 First preview release.
 
