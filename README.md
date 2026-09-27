@@ -48,11 +48,14 @@ socket. It then shows which port that device has today.
 - **Suggestions, never assumptions.** A built-in device database recognizes common USB-to-serial
   chips and radios with built-in USB. For example, it tells you which of a dual-port bridge's two
   ports is the "Enhanced" one. ComInspect shows suggestions but never applies them for you.
+- **Which program has the port.** See which program is using each port, for example *COM4 — in
+  use by VARA FM*, without ComInspect opening it. Ask to be notified when the port is free, and
+  optionally have ComInspect start the next program, such as VarAC, the moment it is.
 - **Live updates.** The list changes as soon as you plug in or remove a device.
 - **Search and filters.** Filter by connected, disconnected, USB, Bluetooth, virtual, CAT, PTT,
   KISS or unknown. You can also search across names, hardware IDs and notes.
 - **Safe diagnostics, only when you ask.** You can:
-  - check whether another program is using a port
+  - test that a port opens, and read its incoming control lines
   - send one read-only CAT query, with automatic baud-rate detection
   - run a short PTT test after confirming it
 
@@ -66,6 +69,9 @@ socket. It then shows which port that device has today.
   check.
 
 <table>
+  <tr>
+    <td colspan="2"><img alt="A port in use by VARA FM, with ComInspect waiting for it to be free and set to start VarAC" src="docs/images/port-usage.png"></td>
+  </tr>
   <tr>
     <td><img alt="A driver problem explained in the details panel" src="docs/images/driver-problem.png"></td>
     <td><img alt="The COM number map showing used, hidden and reserved numbers" src="docs/images/com-map.png"></td>
@@ -140,18 +146,24 @@ uploads your data.
 ## Command-line tool
 
 `cominspect-cli` gives the same discovery and database features without the window. It is useful
-for troubleshooting and scripting. For now, you build it from source (see
-[Development](docs/DEVELOPMENT.md)):
+for troubleshooting and scripting. Download it from the
+[latest release](https://github.com/KK4ODA/ComInspect/releases/latest): pick
+`cominspect-cli-<version>-windows-x64.zip`, `-macos-arm64.tar.gz` (Apple silicon),
+`-macos-x64.tar.gz` (Intel), `-linux-x64.tar.gz` or `-linux-arm64.tar.gz`, unpack it and run it
+from a terminal. You can also build it from source (see [Development](docs/DEVELOPMENT.md)).
 
 ```
 cominspect-cli list               # every serial port, with details (never opens a port)
+cominspect-cli who                # which programs are using each port (never opens a port)
+cominspect-cli wait-free COM4 --then "C:\VarAC\VarAC.exe"   # start VarAC once COM4 is free
 cominspect-cli watch              # print arrivals and removals as they happen
 cominspect-cli inventory          # the app's device list, with your names
 cominspect-cli export --out FILE  # export port mappings
 cominspect-cli cat COM7 --protocol kenwood-id   # one read-only CAT query (auto baud)
 ```
 
-Run `cominspect-cli` with no arguments to see all commands and options.
+Run `cominspect-cli` with no arguments to see all commands and options. On macOS, a downloaded copy
+is quarantined; allow it with `xattr -d com.apple.quarantine cominspect-cli`.
 
 ## Documentation
 
@@ -165,7 +177,7 @@ Run `cominspect-cli` with no arguments to see all commands and options.
 
 ## Status
 
-ComInspect is an early preview (version 0.1). Windows 10 and 11 are the main platforms, and Linux
+ComInspect is an early preview (version 0.2). Windows 10 and 11 are the main platforms, and Linux
 and macOS are supported too. Please report problems and devices that ComInspect doesn't recognize
 on the [issue tracker](https://github.com/KK4ODA/ComInspect/issues). To help, attach the output of
 `cominspect-cli list --json` or the log file (**Menu → Open log folder**).

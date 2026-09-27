@@ -8,6 +8,7 @@
   import Icon from './Icon.svelte';
   import IdentityEditor from './IdentityEditor.svelte';
   import KV from './KV.svelte';
+  import PortUsage from './PortUsage.svelte';
   import Section from './Section.svelte';
 
   const row = $derived(app.selectedRow);
@@ -18,6 +19,10 @@
   const problems = $derived((detail?.findings ?? []).filter((f) => f.severity !== 'info'));
   const notes = $derived((detail?.findings ?? []).filter((f) => f.severity === 'info'));
   const isWindows = $derived(app.view?.scan?.platform === 'windows');
+  const usage = $derived(app.usageFor(row));
+  const usageBadge = $derived(
+    usage?.watch ? 'waiting' : usage?.state === 'in_use' ? 'in use' : usage?.state === 'free' ? 'free' : null,
+  );
 
   function applyHint(h: Hint) {
     if (!row) return;
@@ -77,6 +82,12 @@
           <div><strong>{f.title}</strong><br />{f.detail}</div>
         </div>
       {/each}
+
+      {#if app.usage && isConnected(row.status)}
+        <Section key="usage" title="Programs using this port" badge={usageBadge}>
+          <PortUsage {row} />
+        </Section>
+      {/if}
 
       <Section key="identity" title="User identity">
         <IdentityEditor {row} />

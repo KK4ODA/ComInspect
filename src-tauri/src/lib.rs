@@ -5,6 +5,7 @@ mod error;
 mod lifecycle;
 mod state;
 mod updates;
+mod usage;
 
 use tauri::{Manager, RunEvent};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
@@ -54,6 +55,20 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
+        .on_window_event(|window, event| match event {
+            // Show fresh "in use by" information when the user comes back.
+            tauri::WindowEvent::Focused(true) => {
+                if let Some(state) = window.app_handle().try_state::<state::AppState>() {
+                    state.usage.refresh();
+                }
+            }
+            // Closing ends any wait for a port to be free: ask first.
+            tauri::WindowEvent::CloseRequested { api, .. } if usage::ask_before_close(window) => {
+                api.prevent_close();
+            }
+            _ => {}
+        })
         .setup(|app| {
             #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
             app.handle()
@@ -95,6 +110,11 @@ pub fn run() {
             commands::diag_open_test,
             commands::diag_cat_query,
             commands::diag_ptt_test,
+            commands::get_port_usage,
+            commands::watch_port,
+            commands::unwatch_port,
+            commands::get_watch_program,
+            commands::pick_program,
         ])
         .build(tauri::generate_context!())
         .expect("error while building ComInspect");

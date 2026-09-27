@@ -50,11 +50,13 @@ crates/
   cominspect-store/      SQLite database: schema and migrations, backups,
                          reconciliation of scans with known devices, import/export
   cominspect-platform/   serial port discovery and change monitoring per OS
-                         (windows/, linux/, macos/), plus explicit diagnostics
-                         (open test, CAT queries, PTT test)
+                         (windows/, linux/, macos/), which programs have a
+                         port open (usage/), starting a program (launch.rs),
+                         plus explicit diagnostics (open test, CAT queries,
+                         PTT test)
   cominspect-cli/        the `cominspect-cli` command-line tool
 src-tauri/               the desktop app: Tauri commands, app state, updater,
-                         launch bookkeeping; tauri.conf.json
+                         port usage watcher, launch bookkeeping; tauri.conf.json
 ui/                      Svelte 5 + TypeScript front end
   src/lib/               state (app.svelte.ts), backends (Tauri and demo),
                          labels, filters, formatting, types
@@ -96,10 +98,21 @@ npm test                             # front-end unit tests
     virtual ports
   - interpretation of Windows device properties and macOS IORegistry data from recorded values
   - CAT reply parsing
+  - which process holds a port: a pseudo-terminal held by a child process (Linux, macOS), and on
+    Windows a real serial port (below)
 - **The desktop app:** launch and recovery bookkeeping, and update channels.
 
 The Windows and macOS system calls themselves run in CI on real Windows and macOS machines, which
-execute `cominspect-cli list --json` as a smoke test.
+execute `cominspect-cli list --json` as a smoke test. They also hold a port from another process
+and check that `cominspect-cli who` names it and that `wait-free` returns once it is released.
+
+The Windows tests that need a real serial port read its name from `COMINSPECT_TEST_PORT`; CI sets
+it to the runner's `COM2`, and without it they are skipped. To run them on your own computer, name
+a port that nothing else is using:
+
+```powershell
+$env:COMINSPECT_TEST_PORT = "COM3"; cargo test -p cominspect-platform usage
+```
 
 ### Checking Windows and macOS code from Linux
 

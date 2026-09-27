@@ -2,7 +2,14 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 import type { Backend } from './api';
-import type { DownloadEvent, InventoryEvent, InventoryView, UpdateStatus } from './types';
+import type {
+  DownloadEvent,
+  InventoryEvent,
+  InventoryView,
+  ReleasedEvent,
+  UpdateStatus,
+  UsageView,
+} from './types';
 
 function channel(onEvent: (e: DownloadEvent) => void): Channel<DownloadEvent> {
   const ch = new Channel<DownloadEvent>();
@@ -45,6 +52,13 @@ export function createTauriBackend(): Backend {
     catQuery: (port, settings, protocol, civAddress, timeoutMs) =>
       invoke('diag_cat_query', { port, settings, protocol, civAddress, timeoutMs }),
     pttTest: (port, line, durationMs) => invoke('diag_ptt_test', { port, line, durationMs }),
+    getPortUsage: () => invoke('get_port_usage'),
+    watchPort: (port, deviceId, thenOpen) => invoke('watch_port', { port, deviceId, thenOpen }),
+    unwatchPort: (port) => invoke('unwatch_port', { port }),
+    getWatchProgram: (deviceId) => invoke('get_watch_program', { deviceId }),
+    pickProgram: () => invoke('pick_program'),
+    onUsageUpdated: (cb) => listen<UsageView>('usage://updated', (e) => cb(e.payload)),
+    onUsageReleased: (cb) => listen<ReleasedEvent>('usage://released', (e) => cb(e.payload)),
     onInventoryUpdated: (cb) => listen<InventoryView>('inventory://updated', (e) => cb(e.payload)),
     onInventoryEvents: (cb) => listen<InventoryEvent[]>('inventory://events', (e) => cb(e.payload)),
     onUpdateStatus: (cb) => listen<UpdateStatus>('updater://status', (e) => cb(e.payload)),

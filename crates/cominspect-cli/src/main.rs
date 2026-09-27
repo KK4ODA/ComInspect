@@ -4,13 +4,14 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cominspect_core::analysis::analyze_scan;
 use cominspect_core::model::ScanResult;
 use cominspect_platform::cat::CatProtocol;
 use cominspect_platform::diagnostics::{self, FlowSetting, ParitySetting, SerialSettings};
 use cominspect_platform::monitor::{Monitor, MonitorConfig};
+use cominspect_platform::usage::{PortUsage, UsageProbe};
 use cominspect_store::{Inventory, Store};
 
 const USAGE: &str = "\
@@ -27,6 +28,13 @@ COMMANDS:
                                   (default database: the ComInspect app's database)
     export [--db PATH] --out FILE Export nicknames and identities to a JSON file
     db-path                       Print the default database location
+    who [PORT...] [--json]        Show which programs have ports open (never opens a port);
+                                  without PORT, every connected port
+    wait-free PORT [--timeout SECS] [--then PROGRAM] [--interval MS] [--quiet]
+                                  Wait until no program has PORT open, then exit 0 (or
+                                  start PROGRAM). Exits 2 on timeout (default 300 s,
+                                  0 = no limit), 1 if the port disappears. Checks every
+                                  MS milliseconds (default 500)
     test-open PORT                Check whether PORT can be opened (may toggle DTR/RTS!)
     cat PORT --protocol P [--baud N|auto] [--stop-bits 1|2] [--civ HEX]
                                   Send one read-only CAT query. P is one of:
@@ -51,6 +59,8 @@ fn main() -> ExitCode {
             println!("{}", default_db_path().display());
             Ok(())
         }
+        "who" => cmd_who(rest),
+        "wait-free" => return cmd_wait_free(rest),
         "test-open" => cmd_test_open(rest),
         "cat" => cmd_cat(rest),
         "version" | "--version" | "-V" => {
@@ -287,6 +297,162 @@ fn cmd_export(args: &[String]) -> Result<(), String> {
     std::fs::write(&out, doc.to_json_pretty()).map_err(|e| e.to_string())?;
     println!("Exported {} devices to {out}", doc.devices.len());
     Ok(())
+}
+
+fn positionals(args: &[String], with_values: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut skip = false;
+    for arg in args {
+        if skip {
+            skip = false;
+        } else if with_values.contains(&arg.as_str()) {
+            skip = true;
+        } else if !arg.starts_with("--") {
+            out.push(arg.clone());
+        }
+    }
+    out
+}
+
+fn connected_ports() -> Vec<String> {
+    cominspect_platform::discover()
+        .ports
+        .into_iter()
+        .filter(|p| p.presence == cominspect_core::Presence::Present)
+        .map(|p| p.port_name)
+        .collect()
+}
+
+fn usage_state(usage: &PortUsage) -> &'static str {
+    match usage {
+        PortUsage::Free => "free",
+        PortUsage::InUse { .. } => "in use",
+        PortUsage::Unknown { .. } => "unknown",
+    }
+}
+
+fn cmd_who(args: &[String]) -> Result<(), String> {
+    let mut ports = positionals(args, &[]);
+    if ports.is_empty() {
+        ports = connected_ports();
+    }
+    let snapshot = UsageProbe::new().check(&ports);
+    if flag(args, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&snapshot).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+    if snapshot.ports.is_empty() {
+        println!("No connected serial ports.");
+        return Ok(());
+    }
+    println!("{:<24} {:<8} PROGRAM", "PORT", "STATE");
+    for (port, usage) in &snapshot.ports {
+        let detail = match usage {
+            PortUsage::Free => String::new(),
+            PortUsage::InUse { .. } => usage.describe(),
+            PortUsage::Unknown { reason } => reason.clone(),
+        };
+        println!(
+            "{:<24} {:<8} {detail}",
+            truncate(port, 24),
+            usage_state(usage)
+        );
+    }
+    if let Some(note) = &snapshot.limitation {
+        println!("\nNote: {note}");
+    }
+    Ok(())
+}
+
+/// Waits for a port to be released. Exit codes: 0 free (and PROGRAM
+/// started), 1 error or port gone, 2 timeout.
+fn cmd_wait_free(args: &[String]) -> ExitCode {
+    let fail = |message: String| {
+        eprintln!("error: {message}");
+        ExitCode::FAILURE
+    };
+    let Some(port) = positionals(args, &["--timeout", "--then", "--interval"])
+        .into_iter()
+        .next()
+    else {
+        return fail("PORT is required".into());
+    };
+    let timeout = match option(args, "--timeout").map(|t| t.parse::<f64>()) {
+        None => Some(Duration::from_secs(300)),
+        Some(Ok(t)) if t <= 0.0 => None,
+        Some(Ok(t)) => Some(Duration::from_secs_f64(t)),
+        Some(Err(_)) => return fail("--timeout needs a number of seconds".into()),
+    };
+    let interval = option(args, "--interval")
+        .and_then(|i| i.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::from_millis(500))
+        .max(Duration::from_millis(100));
+    let then = option(args, "--then");
+    let quiet = flag(args, "--quiet");
+
+    let started = Instant::now();
+    let mut probe = UsageProbe::new();
+    let ports = vec![port.clone()];
+    let mut announced = false;
+    loop {
+        let usage = probe
+            .check(&ports)
+            .ports
+            .remove(&port)
+            .unwrap_or(PortUsage::Unknown {
+                reason: "not checked".into(),
+            });
+        match &usage {
+            PortUsage::Free => {
+                if !quiet {
+                    println!(
+                        "{port} is free (waited {:.1} s).",
+                        started.elapsed().as_secs_f64()
+                    );
+                }
+                if let Some(program) = &then {
+                    if let Err(e) = cominspect_platform::launch::launch_program(program) {
+                        return fail(e);
+                    }
+                    if !quiet {
+                        println!("Started {program}.");
+                    }
+                }
+                return ExitCode::SUCCESS;
+            }
+            PortUsage::InUse { .. } => {
+                if !announced && !quiet {
+                    println!(
+                        "{port} is in use by {}; waiting for it to be released...",
+                        usage.describe()
+                    );
+                    announced = true;
+                }
+            }
+            PortUsage::Unknown { reason } => {
+                if !cominspect_platform::discover()
+                    .ports
+                    .iter()
+                    .any(|p| p.port_name.eq_ignore_ascii_case(&port))
+                {
+                    return fail(format!("{port} does not exist or was unplugged ({reason})"));
+                }
+            }
+        }
+        if timeout.is_some_and(|t| started.elapsed() >= t) {
+            eprintln!(
+                "{port} is still in use after {:.0} s: {}",
+                started.elapsed().as_secs_f64(),
+                usage.describe()
+            );
+            return ExitCode::from(2);
+        }
+        std::thread::sleep(interval);
+    }
 }
 
 fn cmd_test_open(args: &[String]) -> Result<(), String> {

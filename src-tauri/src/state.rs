@@ -8,12 +8,13 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use cominspect_core::model::ScanResult;
 use cominspect_platform::monitor::{Monitor, MonitorConfig, ScanTrigger};
-use cominspect_store::view::{InventoryEvent, InventoryView};
+use cominspect_store::view::{InventoryEvent, InventoryView, PortStatus};
 use cominspect_store::{Inventory, OpenReport, Store};
 
 use crate::error::CmdResult;
 use crate::lifecycle::{self, StartupInfo};
 use crate::updates::UpdateState;
+use crate::usage::{self, UsageState};
 
 pub const EVENT_INVENTORY_UPDATED: &str = "inventory://updated";
 pub const EVENT_INVENTORY_EVENTS: &str = "inventory://events";
@@ -32,6 +33,7 @@ pub struct AppState {
     pub open_report: Mutex<OpenReport>,
     pub startup: StartupInfo,
     pub updates: UpdateState,
+    pub usage: UsageState,
     pub version: String,
 }
 
@@ -103,6 +105,7 @@ impl AppState {
             open_report: Mutex::new(report),
             startup,
             updates,
+            usage: UsageState::default(),
             version,
         })
     }
@@ -123,6 +126,18 @@ pub fn apply_scan(
     if let Err(e) = app.emit(EVENT_INVENTORY_UPDATED, &view) {
         log::warn!("could not emit inventory update: {e}");
     }
+    // Keep the usage check on the ports that are connected now.
+    let connected = view
+        .rows
+        .iter()
+        .filter(|r| matches!(r.status, PortStatus::Connected | PortStatus::Problem))
+        .filter_map(|r| {
+            let port = r.port.clone()?;
+            let label = r.nickname.clone().unwrap_or_else(|| r.device_label.clone());
+            Some((port, label))
+        })
+        .collect();
+    state.usage.set_ports(app, connected);
     let live: Vec<InventoryEvent> = events.into_iter().filter(|e| !e.initial).collect();
     for e in &live {
         log::info!(
@@ -154,9 +169,11 @@ pub fn start_monitor(app: &AppHandle) {
         },
     );
     *lock(&app.state::<AppState>().monitor) = Some(monitor);
+    usage::start(app);
 }
 
 pub fn stop_monitor(app: &AppHandle) {
+    usage::stop(app);
     if let Some(state) = app.try_state::<AppState>() {
         let monitor = lock(&state.monitor).take();
         drop(monitor);

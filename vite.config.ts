@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -8,6 +11,8 @@ export default defineConfig({
   root: 'ui',
   plugins: [svelte({ configFile: '../svelte.config.js' })],
   clearScreen: false,
+  // The demo backend shows the real version.
+  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   envPrefix: ['VITE_', 'TAURI_ENV_'],
   server: {
     port: 5173,

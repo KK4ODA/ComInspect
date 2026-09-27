@@ -14,10 +14,12 @@ import type {
   OpenTestReport,
   ProbeCatalog,
   PttTestReport,
+  ReleasedEvent,
   SerialSettings,
   UiPrefs,
   UpdateChannel,
   UpdateStatus,
+  UsageView,
 } from './types';
 
 export type Unlisten = () => void;
@@ -61,6 +63,15 @@ export interface Backend {
     timeoutMs: number,
   ): Promise<CatQueryReport>;
   pttTest(port: string, line: ControlLine, durationMs: number): Promise<PttTestReport>;
+  getPortUsage(): Promise<UsageView>;
+  /** Waits for `port` to be released; optionally starts `thenOpen` then. */
+  watchPort(port: string, deviceId: number | null, thenOpen: string | null): Promise<UsageView>;
+  unwatchPort(port: string): Promise<UsageView>;
+  /** The program last chosen to start when this device's port is free. */
+  getWatchProgram(deviceId: number): Promise<string | null>;
+  pickProgram(): Promise<string | null>;
+  onUsageUpdated(cb: (view: UsageView) => void): Promise<Unlisten>;
+  onUsageReleased(cb: (event: ReleasedEvent) => void): Promise<Unlisten>;
   onInventoryUpdated(cb: (view: InventoryView) => void): Promise<Unlisten>;
   onInventoryEvents(cb: (events: InventoryEvent[]) => void): Promise<Unlisten>;
   onUpdateStatus(cb: (status: UpdateStatus) => void): Promise<Unlisten>;

@@ -1,9 +1,10 @@
 <script lang="ts">
   import { app } from '../lib/app.svelte';
   import { isConnected, type SortColumn } from '../lib/filters';
-  import { isRecent, relativeTime, dateTime, vidPid } from '../lib/format';
+  import { isRecent, relativeTime, dateTime, timeOfDay, vidPid } from '../lib/format';
   import { STATUS_TEXT, TRANSPORTS, purposeLabel } from '../lib/labels';
-  import type { PortRow } from '../lib/types';
+  import type { PortRow, PortUsageView } from '../lib/types';
+  import { usageSummary } from '../lib/usage';
   import Icon from './Icon.svelte';
 
   let { editTick = 0 }: { editTick?: number } = $props();
@@ -68,6 +69,12 @@
     return TRANSPORTS[row.transport];
   }
 
+  function usageTitle(usage: PortUsageView): string {
+    let text = `${usageSummary(usage)} since ${timeOfDay(usage.since)}${usage.sinceExact ? '' : ' or earlier'}.`;
+    if (usage.watch) text += ' ComInspect will tell you when it is free.';
+    return text;
+  }
+
   function sortIndicator(key: SortColumn): string {
     if (app.sort.column !== key) return '';
     return app.sort.dir === 1 ? '▲' : '▼';
@@ -95,6 +102,7 @@
     <tbody>
       {#each app.rows as row (row.deviceId)}
         {@const connected = isConnected(row.status)}
+        {@const usage = app.usageFor(row)}
         <tr
           data-device={row.deviceId}
           class:selected={row.deviceId === app.selectedId}
@@ -116,7 +124,12 @@
           </td>
           <td class="c-port">
             <span class="port mono">{row.portShort ?? '—'}</span>
-            {#if row.previousPort && isRecent(row.portChangedAt, app.now)}
+            {#if usage?.state === 'in_use'}
+              {@const closing = !!usage.holders?.length && usage.holders.every((h) => h.exiting)}
+              <span class="pill usage" class:watched={!!usage.watch || closing} title={usageTitle(usage)}
+                >{#if usage.watch}<Icon name="bell" size={11} />{/if}{closing ? 'closing' : 'in use'}</span
+              >
+            {:else if row.previousPort && isRecent(row.portChangedAt, app.now)}
               <span class="was" title={`Changed from ${row.previousPort} ${relativeTime(row.portChangedAt, app.now).toLowerCase()}`}
                 >was {row.previousPort}</span
               >
@@ -270,7 +283,7 @@
     width: 46px;
   }
   .c-port {
-    width: 122px;
+    width: 136px;
   }
   .c-nick {
     width: 19%;
@@ -317,6 +330,17 @@
   }
   tr.offline .port {
     font-weight: 500;
+  }
+  .usage {
+    margin-left: 6px;
+    vertical-align: middle;
+    background: var(--accent-soft);
+    color: var(--accent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 25%, transparent);
+  }
+  .usage.watched {
+    background: var(--warn-soft);
+    color: var(--warn);
   }
   .was {
     margin-left: 5px;

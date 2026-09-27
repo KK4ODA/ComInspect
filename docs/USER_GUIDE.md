@@ -15,15 +15,16 @@ Contents:
 2. [Port status](#port-status)
 3. [Naming your ports](#naming-your-ports)
 4. [Finding out which port is which](#finding-out-which-port-is-which)
-5. [How ComInspect recognizes a device](#how-cominspect-recognizes-a-device)
-6. [Hidden ports and COM numbers on Windows](#hidden-ports-and-com-numbers-on-windows)
-7. [Warnings and notices](#warnings-and-notices)
-8. [Diagnostics](#diagnostics)
-9. [Search, filters and keyboard shortcuts](#search-filters-and-keyboard-shortcuts)
-10. [Moving to another computer: export and import](#moving-to-another-computer-export-and-import)
-11. [Your data and backups](#your-data-and-backups)
-12. [Updates](#updates)
-13. [Troubleshooting](#troubleshooting)
+5. [Which program is using a port](#which-program-is-using-a-port)
+6. [How ComInspect recognizes a device](#how-cominspect-recognizes-a-device)
+7. [Hidden ports and COM numbers on Windows](#hidden-ports-and-com-numbers-on-windows)
+8. [Warnings and notices](#warnings-and-notices)
+9. [Diagnostics](#diagnostics)
+10. [Search, filters and keyboard shortcuts](#search-filters-and-keyboard-shortcuts)
+11. [Moving to another computer: export and import](#moving-to-another-computer-export-and-import)
+12. [Your data and backups](#your-data-and-backups)
+13. [Updates](#updates)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -38,7 +39,7 @@ The table has one row per device, with these columns:
 | Column | Meaning |
 |---|---|
 | **Status** | Whether the device is connected now (see [Port status](#port-status)) |
-| **Port** | Its current or last known port: `COM7` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial-…` on macOS. A small *was COM5* tag appears for a week after a port number changes. |
+| **Port** | Its current or last known port: `COM7` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial-…` on macOS. An *in use* tag means a program has the port open (see [Which program is using a port](#which-program-is-using-a-port)). A small *was COM5* tag appears for a week after a port number changes. |
 | **Nickname** | Your name for the port. Double-click it to edit it in place. |
 | **Device** | What the operating system reports, such as *Silicon Labs Dual CP2105 USB to UART Bridge*. A grey tag in front shows what ComInspect's device database recognized, such as *Enhanced COM port* or *Icom IC-7300*. |
 | **Type** | USB, Bluetooth, Virtual, PCI or Built-in |
@@ -131,6 +132,76 @@ radio. That helps when you come back months later.
   port and its baud rate.
 - **Find the PTT line.** The [PTT test](#ptt-test) briefly keys the transmitter through RTS or DTR.
   Use it only with an antenna or dummy load connected.
+
+---
+
+## Which program is using a port
+
+![A port in use by VARA FM, with ComInspect waiting for it to be free and set to start VarAC](images/port-usage.png)
+
+Only one program can use a serial port at a time. While your logger, VARA or WSJT-X has a port
+open, other programs get "port busy" or "access denied". ComInspect shows who has each port:
+
+- **In the port list**, a connected port that a program has open shows an **in use** tag. Point at
+  it to see the program. The tag reads **closing** while that program shuts down, and shows a bell
+  while ComInspect waits for the port to be free.
+- **In the details panel**, the **Programs using this port** section names each program, with its
+  file name and process ID (PID), and since when it has had the port. *Not in use by any program*
+  means the port is free.
+
+ComInspect reads this from the operating system. It never opens the port to check, so it can't key
+your radio or get in another program's way. The information is refreshed every couple of seconds
+while ComInspect's window is open.
+
+### Getting told when a port is free
+
+Some programs hold on to a port for a while after you close them. VARA FM, for example, can take up
+to a minute, and until then VarAC can't open the port. Instead of retrying:
+
+1. Select the port.
+2. Optionally, click **Also start a program when it's free…** and choose the program to start, such
+   as VarAC. ComInspect remembers the choice for that device.
+3. Click **Notify me when it's free**.
+
+As soon as the port is released, a desktop notification tells you so and the chosen program starts.
+While ComInspect waits, the details panel says *Waiting for COM4 to be free* and the port list
+shows a bell. **Stop waiting** cancels.
+
+Keep ComInspect running while it waits; minimized is fine. If you close it, it asks first, because
+you would no longer be notified.
+
+### What ComInspect can't see
+
+- **Programs with more rights than ComInspect.**
+  - **Windows:** programs running as administrator, or as another user, stay hidden unless
+    ComInspect also runs as administrator. If a port looks free but a program says it's busy, try
+    right-clicking ComInspect and choosing **Run as administrator**.
+  - **Linux and macOS:** programs run by other users, or as root (such as ModemManager or gpsd),
+    stay hidden unless ComInspect runs as root.
+- **A program waiting a long time for data (Windows).** A program that has been waiting for data
+  on the port with none arriving may not show up until data arrives or it stops waiting.
+
+The details panel of a free port repeats what applies to your computer.
+
+### From the command line
+
+The [command-line tool](../README.md#command-line-tool) does the same:
+
+```
+cominspect-cli who                  # every connected port and the programs using it
+cominspect-cli who COM4 --json      # the same for one port, for scripts
+cominspect-cli wait-free COM4 --then "C:\VarAC\VarAC.exe"
+```
+
+`wait-free` waits until no program has the port open, starts the program given with `--then`, and
+exits with code 0. It exits with 2 if the port is still in use after `--timeout` seconds (300 by
+default; `--timeout 0` waits as long as it takes), and with 1 if the port disappears. For example,
+a batch file that switches from VARA FM to VarAC:
+
+```bat
+taskkill /IM VARAFM.exe
+cominspect-cli wait-free COM4 --timeout 120 --then "C:\VarAC\VarAC.exe"
+```
 
 ---
 
@@ -251,8 +322,8 @@ Diagnostics are available only while the device is connected. They include:
 
 - **Opened.** The port works. The states of the incoming control lines (CTS, DSR, DCD and RI) are
   also shown.
-- **In use.** Another program has the port open. On Linux, ComInspect names the program when it
-  can.
+- **In use.** Another program has the port open. ComInspect names the program, when it can see
+  it, and leaves the port alone.
 - **Permission denied**, **Not found** or another error, with an explanation.
 
 ### CAT query (read-only)
@@ -445,9 +516,13 @@ Everything is stored locally in one SQLite database:
 **Another program says the port is busy.**
 
 - Only one program can use a serial port at a time.
-- **Test open** shows whether the port is in use and, on Linux, which program has it.
+- The details panel shows which program has it (see
+  [Which program is using a port](#which-program-is-using-a-port)). If no program is listed, it may
+  be running as administrator.
 - Close that program, or share the radio through rig-control software such as flrig, Hamlib's
   rigctld or OmniRig.
+- If the program takes a while to let go of the port after you close it, use **Notify me when it's
+  free** instead of retrying.
 
 **Prolific cable with a yellow warning (Code 10) on Windows.**
 

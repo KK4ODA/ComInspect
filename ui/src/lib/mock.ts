@@ -10,12 +10,18 @@ import type {
   Hint,
   InventoryEvent,
   InventoryView,
+  PortHolder,
   PortRow,
+  ReleasedEvent,
   Transport,
   UpdateStatus,
+  UsageView,
 } from './types';
 
 const DAY = 86_400_000;
+/** The demo runs this version and always offers the next minor one. */
+const APP_VERSION = __APP_VERSION__;
+const NEXT_VERSION = APP_VERSION.replace(/^(\d+)\.(\d+)\..*$/, (_, major: string, minor: string) => `${major}.${Number(minor) + 1}.0`);
 const now = Date.now();
 
 interface MockDevice {
@@ -532,7 +538,7 @@ export function createMockBackend(): Backend {
     update: new Set<(s: UpdateStatus) => void>(),
   };
   let update: UpdateStatus = {
-    currentVersion: '0.1.0',
+    currentVersion: APP_VERSION,
     configured: true,
     supported: true,
     phase: 'idle',
@@ -546,6 +552,40 @@ export function createMockBackend(): Backend {
   };
   let prefs = {};
   const delay = <T>(value: T, ms = 60): Promise<T> => new Promise((r) => setTimeout(() => r(value), ms));
+
+  // Programs holding ports in the demo station.
+  const usageListeners = new Set<(v: UsageView) => void>();
+  const releasedListeners = new Set<(e: ReleasedEvent) => void>();
+  const demoHolders: Record<string, PortHolder> = {
+    COM4: {
+      pid: 6120,
+      processName: 'wsjtx.exe',
+      executable: 'C:\\WSJT\\wsjtx\\bin\\wsjtx.exe',
+      description: 'WSJT-X',
+    },
+    COM9: {
+      pid: 4312,
+      processName: 'VARAFM.exe',
+      executable: 'C:\\VARA FM\\VARAFM.exe',
+      description: 'VARA FM',
+    },
+  };
+  const usage: UsageView = { ports: {}, limitation: null, checkedAt: Date.now() };
+  for (const d of devices) {
+    const port = d.row.port;
+    if (!port || !(d.row.status === 'connected' || d.row.status === 'problem')) continue;
+    const holder = demoHolders[port];
+    usage.ports[port] = holder
+      ? { state: 'in_use', holders: [holder], since: now - 42 * 60_000, sinceExact: true, watch: null }
+      : { state: 'free', since: now - 3 * 3600_000, sinceExact: false, watch: null };
+  }
+  const programs = new Map<number, string>([[8, 'C:\\VarAC\\VarAC.exe']]);
+  const usageView = (): UsageView => ({ ...structuredClone(usage), checkedAt: Date.now() });
+  const emitUsage = () => {
+    const v = usageView();
+    usageListeners.forEach((cb) => cb(v));
+    return v;
+  };
 
   const view = (): InventoryView => {
     const rows = devices.map((d) => ({ ...d.row, transport: transportOf(d.row.transport) }));
@@ -706,7 +746,7 @@ export function createMockBackend(): Backend {
   };
 
   const appInfo = (): AppInfo => ({
-    version: '0.1.0',
+    version: APP_VERSION,
     platform: 'windows',
     arch: 'x86_64',
     identifier: 'io.github.kk4oda.cominspect',
@@ -722,7 +762,7 @@ export function createMockBackend(): Backend {
     databaseBackup: null,
     recoveredFile: null,
     migrationsApplied: [],
-    startup: { version: '0.1.0', updatedFrom: null, firstRun: false, recovery: null, previousVersion: null },
+    startup: { version: APP_VERSION, updatedFrom: null, firstRun: false, recovery: null, previousVersion: null },
     repository: 'https://github.com/KK4ODA/ComInspect',
     updates: update,
   });
@@ -774,7 +814,7 @@ export function createMockBackend(): Backend {
         phase: 'available',
         lastChecked: Date.now(),
         available: {
-          version: '0.2.0',
+          version: NEXT_VERSION,
           date: new Date(now - DAY).toISOString(),
           notes: '- Improved Bluetooth port identification\n- Added CAT-port labels for more Yaesu radios\n- Fixed device matching for FTDI dual-channel interfaces',
           manualInstall: null,
@@ -840,6 +880,60 @@ export function createMockBackend(): Backend {
       ),
     pttTest: (port, line, durationMs) =>
       delay({ port, outcome: 'opened' as const, line, heldMs: durationMs, message: `${line.toUpperCase()} was asserted for ${durationMs} ms and released. If the radio transmitted, this is its PTT port and line.` }, durationMs),
+    getPortUsage: () => delay(usageView()),
+    watchPort: (port, deviceId, thenOpen) => {
+      const entry = usage.ports[port];
+      if (!entry) return Promise.reject(new Error(`${port} is not connected.`));
+      if (entry.state === 'free') return Promise.reject(new Error(`${port} is already free.`));
+      if (deviceId != null) {
+        if (thenOpen) programs.set(deviceId, thenOpen);
+        else programs.delete(deviceId);
+      }
+      const armedAt = Date.now();
+      entry.watch = { armedAt, thenOpen };
+      // The demo program shuts down, then lets go of the port.
+      setTimeout(() => {
+        const current = usage.ports[port];
+        if (!current?.watch || current.watch.armedAt !== armedAt || !current.holders) return;
+        current.holders = current.holders.map((h) => ({ ...h, exiting: true }));
+        emitUsage();
+      }, 2500);
+      setTimeout(() => {
+        const current = usage.ports[port];
+        if (!current?.watch || current.watch.armedAt !== armedAt) return;
+        const who = current.holders?.map((h) => h.description ?? h.processName).join(' and ') ?? 'The program';
+        const label = devices.find((d) => d.row.port === port)?.row.nickname ?? port;
+        const program = current.watch.thenOpen?.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') ?? null;
+        usage.ports[port] = { state: 'free', since: Date.now(), sinceExact: true, watch: null };
+        delete demoHolders[port];
+        emitUsage();
+        const seconds = Math.round((Date.now() - armedAt) / 1000);
+        releasedListeners.forEach((cb) =>
+          cb({
+            port,
+            message: `${label} (${port}) is free: ${who} released it after ${seconds} s.${program ? ` Starting ${program}.` : ''}`,
+            started: program,
+            error: null,
+          }),
+        );
+      }, 6000);
+      return delay(usageView());
+    },
+    unwatchPort: (port) => {
+      const entry = usage.ports[port];
+      if (entry) entry.watch = null;
+      return delay(usageView());
+    },
+    getWatchProgram: (deviceId) => delay(programs.get(deviceId) ?? null),
+    pickProgram: () => delay('C:\\VarAC\\VarAC.exe', 200),
+    onUsageUpdated: async (cb): Promise<Unlisten> => {
+      usageListeners.add(cb);
+      return () => usageListeners.delete(cb);
+    },
+    onUsageReleased: async (cb): Promise<Unlisten> => {
+      releasedListeners.add(cb);
+      return () => releasedListeners.delete(cb);
+    },
     onInventoryUpdated: async (cb): Promise<Unlisten> => {
       listeners.inventory.add(cb);
       return () => listeners.inventory.delete(cb);
