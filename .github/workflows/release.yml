@@ -240,16 +240,19 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag }}
 
-      # Never publish a release whose update manifest is incomplete: installed
-      # apps read it through releases/latest/download/latest.json.
-      - name: Verify updater manifest
+      # Never publish a release whose update manifest is incomplete, or whose
+      # signatures installed apps would reject: they read it through
+      # releases/latest/download/latest.json and verify every download
+      # against the public key in tauri.conf.json.
+      - name: Verify updater manifest and signatures
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ needs.prepare.outputs.tag }}"
           gh release download "$TAG" -p latest.json -D manifest --clobber
-          node scripts/check-updater-manifest.mjs manifest/latest.json "${{ needs.prepare.outputs.version }}"
+          node scripts/check-updater-manifest.mjs manifest/latest.json "${{ needs.prepare.outputs.version }}" \
+            --config src-tauri/tauri.conf.json
 
       - name: Publish release
         shell: bash
