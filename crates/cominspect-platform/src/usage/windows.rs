@@ -171,6 +171,12 @@ enum Query {
     Failed,
 }
 
+struct Classified {
+    ports: HashSet<String>,
+    /// Some handle's name could not be read (yet).
+    uncertain: bool,
+}
+
 /// Process handle opened for inspection; closed on drop.
 struct ProcessHandle {
     handle: HANDLE,
@@ -368,25 +374,35 @@ impl Probe {
         }
         let mut ports_by_pid: HashMap<u32, HashSet<String>> = HashMap::new();
         for (pid, keys) in &by_pid {
-            let ports = self.classify_process(*pid, keys, wanted, false, incomplete);
-            if !ports.is_empty() {
-                ports_by_pid.insert(*pid, ports);
+            let found = self.classify_process(*pid, keys, wanted, false, incomplete);
+            if !found.ports.is_empty() {
+                ports_by_pid.insert(*pid, found.ports);
             }
         }
 
         // Before reporting a port released, look again at whoever held it.
-        let mut suspects = HashSet::new();
+        // A holder that is still running and has a handle whose name cannot
+        // be read right now (synchronous I/O in progress) may still have the
+        // port open, so the port is not reported free yet.
+        let mut suspects: HashMap<u32, Vec<String>> = HashMap::new();
         for (port, pids) in &self.last_holders {
             let still_held = ports_by_pid.values().any(|ports| ports.contains(port));
             if !still_held && wanted.values().any(|ports| ports.contains(port)) {
-                suspects.extend(pids.iter().copied());
+                for pid in pids {
+                    suspects.entry(*pid).or_default().push(port.clone());
+                }
             }
         }
-        for pid in suspects {
+        for (pid, previous_ports) in suspects {
             if let Some(keys) = by_pid.get(&pid) {
-                let ports = self.classify_process(pid, keys, wanted, true, incomplete);
-                if !ports.is_empty() {
-                    ports_by_pid.entry(pid).or_default().extend(ports);
+                let found = self.classify_process(pid, keys, wanted, true, incomplete);
+                let entry = ports_by_pid.entry(pid).or_default();
+                entry.extend(found.ports);
+                if found.uncertain {
+                    entry.extend(previous_ports);
+                }
+                if entry.is_empty() {
+                    ports_by_pid.remove(&pid);
                 }
             }
         }
@@ -414,9 +430,10 @@ impl Probe {
         wanted: &HashMap<String, Vec<String>>,
         fresh: bool,
         incomplete: &mut bool,
-    ) -> HashSet<String> {
+    ) -> Classified {
         let mut devices: Vec<String> = Vec::new();
         let mut to_query = Vec::new();
+        let mut uncertain = false;
         for key in keys {
             let cached = self.cache.get(key);
             if self.stalled.contains(key) {
@@ -424,7 +441,10 @@ impl Probe {
                 // open, so an earlier answer is still right.
                 match cached.and_then(|c| c.device.clone()) {
                     Some(device) => devices.push(device),
-                    None => *incomplete |= cached.is_none(),
+                    None => {
+                        uncertain = true;
+                        *incomplete |= cached.is_none();
+                    }
                 }
                 continue;
             }
@@ -444,18 +464,16 @@ impl Probe {
                     for key in to_query {
                         if self.stuck.load(Ordering::SeqCst) >= MAX_STUCK_WORKERS {
                             *incomplete = true;
+                            uncertain = true;
                             break;
                         }
                         match self.query_handle(&process, key) {
                             Some(Some(device)) => devices.push(device),
                             Some(None) => {}
-                            None => {
-                                if let Some(Some(device)) =
-                                    self.cache.get(&key).map(|c| c.device.clone())
-                                {
-                                    devices.push(device);
-                                }
-                            }
+                            None => match self.cache.get(&key).and_then(|c| c.device.clone()) {
+                                Some(device) => devices.push(device),
+                                None => uncertain = true,
+                            },
                         }
                     }
                 }
@@ -472,7 +490,7 @@ impl Probe {
                 ports.extend(names.iter().cloned());
             }
         }
-        ports
+        Classified { ports, uncertain }
     }
 
     /// Duplicates one handle and reads its device name. `None` when the
@@ -856,6 +874,86 @@ mod tests {
         assert_eq!(device_name(nul).as_deref(), Some(r"\device\null"));
         // SAFETY: opened above.
         unsafe { CloseHandle(nul) };
+    }
+
+    /// A program blocked in a synchronous read makes name queries on its
+    /// handle wait. The check must still finish, and ComInspect must not keep
+    /// the port open: once the program closes it, it can be opened again.
+    #[test]
+    fn a_blocked_synchronous_read_neither_hangs_the_check_nor_keeps_the_port_open() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Devices::Communication::{COMMTIMEOUTS, SetCommTimeouts};
+        use windows_sys::Win32::Storage::FileSystem::ReadFile;
+        use windows_sys::Win32::System::IO::CancelSynchronousIo;
+        let Ok(port) = std::env::var("COMINSPECT_TEST_PORT") else {
+            eprintln!("COMINSPECT_TEST_PORT not set; skipping");
+            return;
+        };
+        let path = format!(r"\\.\{port}");
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap_or_else(|e| panic!("cannot open {port}: {e}"));
+        let raw = file.as_raw_handle() as usize;
+        // No timeouts: a read waits until a byte arrives.
+        let timeouts = COMMTIMEOUTS {
+            ReadIntervalTimeout: 0,
+            ReadTotalTimeoutMultiplier: 0,
+            ReadTotalTimeoutConstant: 0,
+            WriteTotalTimeoutMultiplier: 0,
+            WriteTotalTimeoutConstant: 0,
+        };
+        // SAFETY: a valid serial handle.
+        assert_ne!(unsafe { SetCommTimeouts(raw as HANDLE, &timeouts) }, 0);
+        let reader = thread::spawn(move || {
+            let mut byte = [0u8; 1];
+            let mut read = 0u32;
+            // SAFETY: valid handle and buffer; returns when cancelled.
+            unsafe {
+                ReadFile(
+                    raw as HANDLE,
+                    byte.as_mut_ptr(),
+                    1,
+                    &mut read,
+                    std::ptr::null_mut(),
+                )
+            };
+        });
+        thread::sleep(Duration::from_millis(300));
+
+        let mut probe = Probe::new();
+        let started = Instant::now();
+        let snapshot = probe.check(std::slice::from_ref(&port));
+        eprintln!(
+            "check with a blocked read took {:?}: {:?}",
+            started.elapsed(),
+            snapshot
+        );
+        assert!(started.elapsed() < Duration::from_secs(20));
+
+        // SAFETY: the reader thread's handle; cancels its pending read.
+        unsafe { CancelSynchronousIo(reader.as_raw_handle() as HANDLE) };
+        reader.join().unwrap();
+        drop(file);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .share_mode(0)
+                .open(&path)
+            {
+                Ok(_) => break,
+                Err(e) if Instant::now() < deadline => {
+                    eprintln!("{port} not free yet: {e}");
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(e) => panic!("{port} stayed open after it was closed: {e}"),
+            }
+        }
     }
 
     /// Opens a real serial port when the environment names one

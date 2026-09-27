@@ -71,6 +71,26 @@ jobs:
           cargo run --locked -q -p cominspect-cli -- inventory --db ci-test/inventory.db
           cargo run --locked -q -p cominspect-cli -- inventory --db ci-test/inventory.db --json > view.json
           node -e "const v=require('./view.json'); console.log(v.summary)"
+      # Another program holds a port: `who` must name it without opening the
+      # port, and `wait-free` must return once the program lets go.
+      - name: Smoke test - which program holds a port
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            if [ -z "${COMINSPECT_TEST_PORT:-}" ]; then echo "No serial port on this runner"; exit 0; fi
+            pwsh -NoProfile -Command "\$p = [System.IO.Ports.SerialPort]::new('$COMINSPECT_TEST_PORT'); \$p.Open(); Start-Sleep 15; \$p.Close()" &
+            sleep 5
+            cargo run --locked -q -p cominspect-cli -- who "$COMINSPECT_TEST_PORT" | tee who.txt
+            grep -qi "pwsh" who.txt
+            time cargo run --locked -q -p cominspect-cli -- wait-free "$COMINSPECT_TEST_PORT" --timeout 60
+          else
+            python3 -c "import os,pty,time; m,s=pty.openpty(); open('pty.txt','w').write(os.ttyname(s)); time.sleep(10)" &
+            sleep 2
+            cargo run --locked -q -p cominspect-cli -- who "$(cat pty.txt)" | tee who.txt
+            grep -qi "python" who.txt
+          fi
+          wait
 
   frontend:
     name: Frontend

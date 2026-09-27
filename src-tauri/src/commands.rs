@@ -24,6 +24,7 @@ use crate::error::{CmdResult, CommandError};
 use crate::lifecycle::{self, StartupInfo};
 use crate::state::{AppState, apply_scan, hostname, lock};
 use crate::updates::{self, DownloadEvent, UpdateChannel, UpdateStatus};
+use crate::usage::UsageView;
 
 // --- inventory ----------------------------------------------------------------
 
@@ -484,4 +485,96 @@ pub async fn diag_ptt_test(
     })
     .await
     .map_err(|e| CommandError::msg(e.to_string()))
+}
+
+// --- port usage ("in use by", notify when free) --------------------------------
+
+fn program_setting(device_id: i64) -> String {
+    format!("usage.program.{device_id}")
+}
+
+#[tauri::command]
+pub fn get_port_usage(state: State<'_, AppState>) -> UsageView {
+    state.usage.view()
+}
+
+/// Waits for `port` to be released; optionally starts `then_open` then. The
+/// program is remembered for the device.
+#[tauri::command]
+pub async fn watch_port(
+    state: State<'_, AppState>,
+    port: String,
+    device_id: Option<i64>,
+    then_open: Option<String>,
+) -> CmdResult<UsageView> {
+    check_port_name(&port)?;
+    let then_open = then_open.filter(|p| !p.trim().is_empty());
+    if let Some(program) = &then_open
+        && !std::path::Path::new(program).exists()
+    {
+        return Err(CommandError::msg(format!("{program} was not found.")));
+    }
+    if let Some(id) = device_id {
+        let inventory = lock(&state.inventory);
+        let key = program_setting(id);
+        let _ = match &then_open {
+            Some(program) => inventory.store().set_setting(&key, program),
+            None => inventory.store().delete_setting(&key),
+        };
+    }
+    log::info!(
+        "waiting for {port} to be released{}",
+        then_open
+            .as_deref()
+            .map(|p| format!(", then starting {p}"))
+            .unwrap_or_default()
+    );
+    state
+        .usage
+        .watch(&port, then_open)
+        .map_err(CommandError::msg)
+}
+
+#[tauri::command]
+pub fn unwatch_port(state: State<'_, AppState>, port: String) -> UsageView {
+    state.usage.unwatch(&port)
+}
+
+/// The program last chosen to start when this device's port is free.
+#[tauri::command]
+pub async fn get_watch_program(
+    state: State<'_, AppState>,
+    device_id: i64,
+) -> CmdResult<Option<String>> {
+    let inventory = lock(&state.inventory);
+    Ok(inventory
+        .store()
+        .get_setting::<String>(&program_setting(device_id))?
+        .filter(|p| std::path::Path::new(p).exists()))
+}
+
+#[tauri::command]
+pub async fn pick_program(app: AppHandle) -> CmdResult<Option<String>> {
+    let dialog_app = app.clone();
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        let dialog = dialog_app
+            .dialog()
+            .file()
+            .set_title("Program to start when the port is free");
+        let dialog = if cfg!(windows) {
+            dialog.add_filter("Programs and shortcuts", &["exe", "lnk", "bat", "cmd"])
+        } else if cfg!(target_os = "macos") {
+            dialog.add_filter("Applications", &["app"])
+        } else {
+            dialog
+        };
+        dialog.blocking_pick_file()
+    })
+    .await
+    .map_err(|e| CommandError::msg(e.to_string()))?;
+    let Some(path) = chosen else { return Ok(None) };
+    let path: PathBuf = path
+        .into_path()
+        .map_err(|e| CommandError::msg(e.to_string()))?;
+    Ok(Some(path.display().to_string()))
 }
