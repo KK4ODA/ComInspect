@@ -58,7 +58,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFDQkYxNENEOEU4MzI0RjgKUldUNEpJT096UlMvck1nUDg5TGFaaTJKSE1IekRYUnRFdkNZR0haOWVYblhDL0p4QUlWM3VFVmQK",
       "endpoints": [
         "https://github.com/KK4ODA/ComInspect/releases/latest/download/latest.json"
       ],

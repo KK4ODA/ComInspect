@@ -36,31 +36,73 @@ git tag v1.2.3 && git push origin v1.2.3
 Every update is signed with a private key and checked by the app against the matching public key.
 Nothing can be published until the key exists.
 
+> **Status:** this repository's public key, ID `ACBF14CD8E8324F8`, is in
+> `src-tauri/tauri.conf.json`. Its private key and password belong in the two repository secrets
+> below. Copies of ComInspect installed with that key accept only updates signed with it, so
+> don't replace it unless it is lost or leaked. Replacing it means every user has to install the
+> next version by hand.
+
+To create a key, run this on your own computer. It needs Node.js but not a copy of the repository.
+
+macOS or Linux:
+
 ```sh
-npm ci
-npm run tauri signer generate -- -w ~/.tauri/cominspect.key
+npx @tauri-apps/cli@2 signer generate -w ~/.tauri/cominspect.key
 ```
 
-Choose a strong password when asked. This creates `~/.tauri/cominspect.key` (private) and
-`~/.tauri/cominspect.key.pub` (public).
+Windows (PowerShell):
 
-1. Copy the **entire contents** of `cominspect.key.pub` into `src-tauri/tauri.conf.json`, as the
-   value of `plugins.updater.pubkey`, and commit the change. Builds without this key show
-   "automatic updates are disabled".
+```powershell
+npx.cmd "@tauri-apps/cli@2" signer generate -w "$env:USERPROFILE\.tauri\cominspect.key"
+```
+
+On Windows, use `npx.cmd` rather than `npx`. PowerShell's default script policy blocks `npx` with
+"running scripts is disabled on this system". Running the command in Command Prompt (`cmd`)
+avoids that as well; there the path is `"%USERPROFILE%\.tauri\cominspect.key"`.
+
+Choose a strong password when asked; nothing appears while you type it. This creates:
+
+| File | Contents | Share it? |
+|---|---|---|
+| `cominspect.key` | The private key, about 350 characters | Never |
+| `cominspect.key.pub` | The public key, about 150 characters | Safe to share |
+
+Both files are one long line starting with `dW50cnVzdGVk`. Tell them apart by the `.pub` ending.
+
+1. **Back up the private key and its password** before anything else, in a password manager or
+   another safe place:
+   - **If you lose the key or password,** installed copies can never accept another automatic
+     update. Every user would have to download a new version by hand.
+   - **If the key leaks,** someone with it *and* the ability to publish releases on this
+     repository could ship a malicious update. Treat the key like a password.
 2. In the GitHub repository go to **Settings → Secrets and variables → Actions → New repository
    secret** and add:
 
    | Secret | Value |
    |---|---|
-   | `TAURI_SIGNING_PRIVATE_KEY` | The entire contents of `~/.tauri/cominspect.key` |
+   | `TAURI_SIGNING_PRIVATE_KEY` | The entire contents of `cominspect.key` |
    | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The password you chose |
 
-3. **Back up the private key and its password** in a password manager or another safe place:
-   - **If you lose the key,** installed copies can never accept another automatic update. Every user
-     would have to download a new version by hand.
-   - **If the key leaks,** the risk is that someone with it *and* the ability to publish releases
-     on this repository could ship a malicious update. Treat the key like a password.
+   To copy the key, open it in a plain text editor (`notepad "$env:USERPROFILE\.tauri\cominspect.key"`
+   on Windows) or run `pbcopy < ~/.tauri/cominspect.key` on macOS.
+3. Put the **entire contents** of `cominspect.key.pub` into `src-tauri/tauri.conf.json` as the
+   value of `plugins.updater.pubkey`, and commit the change. Builds without a key show
+   "automatic updates are disabled".
 4. Never commit the private key. `.gitignore` already excludes `*.key`.
+
+**Checking the password (optional).** Signing any small file confirms that the key and password
+belong together:
+
+```sh
+npx @tauri-apps/cli@2 signer sign -f ~/.tauri/cominspect.key ~/.tauri/cominspect.key.pub
+```
+
+It asks for the password. *"Your file was signed successfully"* means they match; delete the
+`.sig` file it creates.
+
+**Safety net.** Before publishing, the release workflow verifies every signature in `latest.json`
+against the public key in `tauri.conf.json`. A release signed with a different key, or without
+the version the app requires, stays a draft instead of reaching users.
 
 ### 2. Workflow permissions
 
