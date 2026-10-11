@@ -190,6 +190,18 @@ and macOS are supported too. Please report problems and devices that ComInspect 
 on the [issue tracker](https://github.com/KK4ODA/ComInspect/issues). To help, attach the output of
 `cominspect-cli list --json` or the log file (**Menu → Open log folder**).
 
+<!-- tota-support:start -->
+## Support
+
+ComInspect is free and stays free. It is written by KK4ODA, who also runs
+[Tiles on the Air](https://tilesontheair.com), a free program for portable
+operators, and both are kept going by the people who use them. If ComInspect is
+useful to you, a contribution through the
+[Tiles on the Air giving page](https://tilesontheair.com/Giving) helps keep this tool and Tiles
+running. Nothing is ever locked behind it, and a bug report or an on-air
+report helps just as much.
+<!-- tota-support:end -->
+
 ## License
 
 ComInspect is free software under the [MIT License](LICENSE).
