@@ -56,7 +56,11 @@
 {/snippet}
 
 {#if split}
-  <p class="line">Virtual port of a VSPE <strong>splitter</strong> that shares:</p>
+  {#if split.label}
+    <p class="line">Virtual port of the VSPE splitter <strong>{split.label}</strong>, which shares:</p>
+  {:else}
+    <p class="line">Virtual port of a VSPE <strong>splitter</strong> that shares:</p>
+  {/if}
   <ul class="ports">{@render portButton(split.source)}</ul>
   {#if siblings.length}
     <p class="line muted small">The splitter also shares it as {portList(siblings)}.</p>
@@ -64,7 +68,11 @@
 {/if}
 
 {#each shared as s, i (i)}
-  <p class="line">Shared by a VSPE <strong>splitter</strong> as:</p>
+  {#if s.label}
+    <p class="line">Shared by the VSPE splitter <strong>{s.label}</strong> as:</p>
+  {:else}
+    <p class="line">Shared by a VSPE <strong>splitter</strong> as:</p>
+  {/if}
   <ul class="ports">
     {#each s.ports as port (port)}{@render portButton(port)}{/each}
   </ul>

@@ -248,8 +248,11 @@ in the menu. ComInspect reads the file again whenever its window becomes active.
 
 ComInspect understands splitters (with several virtual ports, as in VSPE 1.5 and later, or one), and
 the documented settings of pairs, connectors, redirectors, TCP servers and clients and UDP devices.
-Other devices, such as Serial Router and Bridge, are recognized but not explained yet. The
-[issue tracker](https://github.com/KK4ODA/ComInspect/issues) welcomes a sample `.vspe` file.
+A name you gave a device in VSPE shows in the dialog and in the VSPE section, for example *Virtual
+port of the VSPE splitter **D750 BT Port***. Other devices, such as Serial Router and Bridge, are
+recognized but not explained yet: the dialog lists them in grey with their settings as VSPE saved
+them. The [issue tracker](https://github.com/KK4ODA/ComInspect/issues) welcomes those settings, or
+a sample `.vspe` file.
 
 From the command line:
 

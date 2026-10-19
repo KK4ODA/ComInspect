@@ -639,7 +639,8 @@ export function createMockBackend(): Backend {
     devices: [
       {
         kind: 'Splitter',
-        settings: 'v2;7;28;v003,38400,8,0,0,0,2,2,0,0,5000,0,5000;2;21;6;0;;;22;6;0;;',
+        settings: 'v3;7;28;v004,38400,8,0,0,0,2,2,0,0,5000,0,5000,0;2;21;6;0;0;0;0;0;0;0;22;6;0;0;0;0;0;0;0',
+        label: 'FTDX10 CAT',
         layout: { type: 'splitter', source: 'COM7', ports: ['COM21', 'COM22'], baud: 38400 },
       },
     ],

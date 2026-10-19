@@ -43,10 +43,11 @@ const virt = (port: string, p: Partial<PortRow> = {}) =>
   row({ port, portShort: port, transport: 'virtual', virtualProvider: 'VSPE', ...p });
 
 const devices: VspeDevice[] = [
-  { kind: 'Splitter', settings: '', layout: { type: 'splitter', source: 'COM5', ports: ['COM10', 'COM8'], baud: 9600 } },
-  { kind: 'Pair', settings: '21;22;0', layout: { type: 'pair', ports: ['COM21', 'COM22'] } },
-  { kind: 'TcpServer', settings: '', layout: { type: 'network', port: 'COM5', protocol: 'TCP server', address: 'port 5555' } },
-  { kind: 'Bridge', settings: '?', layout: null },
+  { kind: 'Splitter', settings: '', label: null, layout: { type: 'splitter', source: 'COM5', ports: ['COM10', 'COM8'], baud: 9600 } },
+  { kind: 'Pair', settings: '21;22;0', label: null, layout: { type: 'pair', ports: ['COM21', 'COM22'] } },
+  { kind: 'TcpServer', settings: '', label: null, layout: { type: 'network', port: 'COM5', protocol: 'TCP server', address: 'port 5555' } },
+  { kind: 'Bridge', settings: '?', label: null, layout: null },
+  { kind: 'Splitter', settings: '', label: 'D750 BT Port', layout: { type: 'splitter', source: 'COM15', ports: ['COM31', 'COM32'], baud: 9600 } },
 ];
 
 describe('VSPE links', () => {
@@ -55,6 +56,7 @@ describe('VSPE links', () => {
   it('indexes every role by port', () => {
     expect(links.splitOf.get('COM8')?.source).toBe('COM5');
     expect(links.sharedBy.get('COM5')).toHaveLength(1);
+    expect(links.splitOf.get('COM32')).toEqual({ source: 'COM15', ports: ['COM31', 'COM32'], baud: 9600, label: 'D750 BT Port' });
     expect(links.roles.get('COM21')).toEqual([{ kind: 'pair', peer: 'COM22' }]);
     expect(links.roles.get('COM5')).toEqual([{ kind: 'network', protocol: 'TCP server', address: 'port 5555' }]);
   });
@@ -122,6 +124,7 @@ describe('VSPE configuration', () => {
       'Pair: COM21 ↔ COM22',
       'TCP server: COM5 on port 5555',
       'Bridge: not understood by ComInspect yet',
+      'Splitter "D750 BT Port": COM15 shared as COM31 and COM32 (9600 baud)',
     ]);
   });
 

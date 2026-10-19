@@ -5,6 +5,8 @@ export interface SplitterLink {
   source: string;
   ports: string[];
   baud: number | null;
+  /** The name the user gave the Splitter in VSPE. */
+  label: string | null;
 }
 
 /** What else VSPE does with a port. */
@@ -33,12 +35,14 @@ function push<T>(map: Map<string, T[]>, port: string, value: T): void {
 
 export function vspeLinks(devices: VspeDevice[]): PortLinks {
   const links: PortLinks = { splitOf: new Map(), sharedBy: new Map(), roles: new Map() };
-  for (const { layout } of devices) {
+  for (const { layout, label } of devices) {
     switch (layout?.type) {
-      case 'splitter':
-        push(links.sharedBy, layout.source, layout);
-        for (const port of layout.ports) links.splitOf.set(key(port), layout);
+      case 'splitter': {
+        const split: SplitterLink = { source: layout.source, ports: layout.ports, baud: layout.baud, label: label ?? null };
+        push(links.sharedBy, split.source, split);
+        for (const port of split.ports) links.splitOf.set(key(port), split);
         break;
+      }
       case 'pair':
       case 'redirector': {
         const [a, b] = layout.ports;
@@ -115,21 +119,25 @@ export function portList(ports: string[]): string {
   return `${ports.slice(0, -1).join(', ')} and ${ports[ports.length - 1]}`;
 }
 
-/** One line per device: "Splitter: COM5 shared as COM8 and COM10 (9600 baud)". */
+/**
+ * One line per device: "Splitter: COM5 shared as COM8 and COM10 (9600 baud)",
+ * or 'Splitter "D750 BT Port": …' when the user named it in VSPE.
+ */
 export function describeDevice(d: VspeDevice): string {
   const l = d.layout;
-  if (!l) return `${d.kind}: not understood by ComInspect yet`;
+  const name = (kind: string) => (d.label ? `${kind} "${d.label}"` : kind);
+  if (!l) return `${name(d.kind)}: not understood by ComInspect yet`;
   switch (l.type) {
     case 'splitter':
-      return `Splitter: ${l.source} shared as ${portList(l.ports)}${l.baud ? ` (${l.baud} baud)` : ''}`;
+      return `${name('Splitter')}: ${l.source} shared as ${portList(l.ports)}${l.baud ? ` (${l.baud} baud)` : ''}`;
     case 'connector':
-      return `Connector: ${l.port}`;
+      return `${name('Connector')}: ${l.port}`;
     case 'pair':
-      return `Pair: ${l.ports.join(' ↔ ')}`;
+      return `${name('Pair')}: ${l.ports.join(' ↔ ')}`;
     case 'redirector':
-      return `Redirector: ${l.ports.join(' ↔ ')}`;
+      return `${name('Redirector')}: ${l.ports.join(' ↔ ')}`;
     case 'network':
-      return `${l.protocol}: ${l.port} on ${l.address}`;
+      return `${name(l.protocol)}: ${l.port} on ${l.address}`;
   }
 }
 

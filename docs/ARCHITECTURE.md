@@ -812,14 +812,19 @@ current setup.
 
 **Format.** After a header with the 32-bit little-endian value `0x11223344` at offset 4, each
 device is a record: the device type (`Splitter`) and its settings string, each a 32-bit length
-followed by the bytes. VSPE 1.5.1 added titles, descriptions and a started/stopped state around the
-records, so they are found by shape (a known type name followed by printable settings) rather than
-at fixed offsets. Settings strings follow Eterlogic's *Devices initialization* page (for example
-`10;9;0;19200,0,8,1,0,0;0;0;0`: a Splitter sharing COM9 as COM10), except for VSPE 1.5's
-multi-port Splitter, `v2;<source>;<options>;<serial settings>;<count>;<port>;…`, where every virtual
-port has the same number of fields and starts with its number. Other versioned formats (`v3;…`, or a
-`v2` for other devices) are kept but not interpreted, so a future format can't produce wrong links.
-A real configuration saved by VSPE 1.5 is a test fixture.
+followed by the bytes. VSPE 1.5.1 added more fields around the records, so they are found by shape
+(a known type name followed by printable settings) rather than at fixed offsets. One of them is the
+name the user gave the device, right after the settings: a 32-bit zero, then a 32-bit character
+count and that many UTF-16LE characters (a count of zero when the device has no name). Settings
+strings follow Eterlogic's *Devices initialization* page (for example
+`10;9;0;19200,0,8,1,0,0;0;0;0`: a Splitter sharing COM9 as COM10), except for the multi-port
+Splitter of VSPE 1.5 and later, `v2;<source>;<options>;<serial settings>;<count>;<port>;…`, where
+every virtual port has the same number of fields (five in `v2`, nine in `v3`) and starts with its
+number. A Splitter is read only when its port list adds up: the count matches, every virtual port
+is a different port, and none is the port shared. Other versioned formats (a `v2` for other devices)
+are kept but not interpreted, so a future format can't produce wrong links; the dialog shows their
+settings as saved. Real configurations saved by VSPE (`v2` and `v3`, one with a named device) are
+test fixtures.
 
 **Display.** The UI nests a Splitter's virtual ports under the port they share when both are in the
 list (`ui/src/lib/vspe.ts`). Only virtual ports are nested, the connected device wins when several

@@ -513,6 +513,8 @@ export interface VspeDevice {
   kind: string;
   /** The settings string as stored in the configuration file. */
   settings: string;
+  /** The name the user gave the device in VSPE, if any. */
+  label: string | null;
   /** Null when ComInspect doesn't understand the settings. */
   layout: VspeLayout | null;
 }

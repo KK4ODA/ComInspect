@@ -5,6 +5,23 @@ All notable changes to ComInspect are documented here. The format is based on
 [Semantic Versioning](https://semver.org/). The release workflow publishes the
 section matching the tag as the release notes shown in the app.
 
+## [0.3.2] - 2026-10-19
+
+Reads splitters saved by newer versions of VSPE.
+
+### Fixed
+
+- **Splitters saved by newer versions of VSPE** (settings starting with `v3`) were listed as "not
+  understood", so their virtual ports weren't shown under the port they share. ComInspect now reads
+  them, and checks that each splitter's list of ports adds up before showing it.
+
+### Added
+
+- Names you give devices in VSPE show in **Menu → VSPE configuration…** and in the VSPE section of
+  the details panel, for example *Virtual port of the VSPE splitter D750 BT Port*.
+- The VSPE configuration dialog shows the settings of any device ComInspect can't read yet, as VSPE
+  saved them, with a button to report it.
+
 ## [0.3.1] - 2026-09-27
 
 Choose which VSPE configuration ComInspect reads.
