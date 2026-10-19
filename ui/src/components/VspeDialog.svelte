@@ -8,6 +8,7 @@
   const view = $derived(app.vspe);
   const mode = $derived(view?.source.mode ?? 'autostart');
   const chosen = $derived(view && view.source.mode !== 'autostart' ? view.source.path : null);
+  const unknown = $derived(view?.devices.some((d) => !d.layout) ?? false);
 
   function close() {
     app.dialog = null;
@@ -66,8 +67,24 @@
       </div>
       {#if view.devices.length}
         <ul class="devices">
-          {#each view.devices as d, i (i)}<li class:unknown={!d.layout}>{describeDevice(d)}</li>{/each}
+          {#each view.devices as d, i (i)}
+            <li class:unknown={!d.layout}>
+              {describeDevice(d)}
+              {#if !d.layout && d.settings}<span class="raw mono">{d.settings}</span>{/if}
+            </li>
+          {/each}
         </ul>
+      {/if}
+      {#if unknown}
+        <div class="report">
+          <span class="muted">
+            Devices shown in grey are set up in a way ComInspect can't read yet. Their settings are shown as VSPE saved
+            them; copy them into an issue report and they can be supported.
+          </span>
+          <button class="btn small" onclick={() => app.backend?.openLink('issues')}>
+            <Icon name="external" size={13} /> Report an issue
+          </button>
+        </div>
       {/if}
       {#if app.vspeMissing.length}
         <div class="callout warn">
@@ -169,6 +186,23 @@
   }
   .devices li.unknown {
     color: var(--muted);
+  }
+  .raw {
+    display: block;
+    font-size: 11px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+  .report {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .report .btn {
+    flex: none;
   }
   .callout :global(svg) {
     flex: none;

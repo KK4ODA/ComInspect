@@ -10,8 +10,10 @@
 //! `0x11223344` at offset 4), followed by one record per device: the device
 //! type (`Splitter`) and its settings string, each stored as a 32-bit
 //! little-endian length and the bytes. VSPE 1.5.1 and later store more
-//! fields around them (titles, descriptions, whether the device is stopped),
-//! so records are found by their shape rather than at fixed offsets.
+//! fields around them, so records are found by their shape rather than at
+//! fixed offsets. Among them is the name the user gave the device, right
+//! after the settings: a 32-bit zero, then the name as a 32-bit character
+//! count and UTF-16LE text.
 //!
 //! The settings strings are documented by Eterlogic for the VSPE API
 //! ("Devices initialization"), for example `10;9;0;19200,0,8,1,0,0;0;0;0` for
@@ -19,6 +21,7 @@
 //! eight virtual ports, stored as
 //! `v2;<source>;<options>;<serial settings>;<count>;<port>;…` where every
 //! virtual port has the same number of fields and starts with its number.
+//! Later versions write `v3` with more fields per port in the same layout.
 //! Settings in other versioned formats are kept but not interpreted.
 
 use serde::{Deserialize, Serialize};
@@ -29,6 +32,8 @@ const MAX_KIND_LEN: usize = 32;
 const MAX_SETTINGS_LEN: usize = 8192;
 /// A Splitter has at most this many virtual ports.
 const MAX_SPLITTER_PORTS: usize = 8;
+/// Longest device name accepted, in UTF-16 units.
+const MAX_LABEL_LEN: usize = 256;
 
 /// One VSPE device from a configuration file.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,6 +43,9 @@ pub struct VspeDevice {
     pub kind: String,
     /// The settings string as stored in the file.
     pub settings: String,
+    /// The name the user gave the device in VSPE, if any.
+    #[serde(default)]
+    pub label: Option<String>,
     /// The ports involved, when ComInspect understands the settings.
     pub layout: Option<VspeLayout>,
 }
@@ -84,10 +92,19 @@ impl VspeLayout {
 }
 
 impl VspeDevice {
-    /// One line for people: "Splitter: COM5 shared as COM8 and COM10 (9600 baud)".
+    /// One line for people: "Splitter: COM5 shared as COM8 and COM10 (9600
+    /// baud)", or `Splitter "D750 BT Port": …` when the device has a name.
     pub fn describe(&self) -> String {
+        let name = |kind: &str| match &self.label {
+            Some(label) => format!("{kind} \"{label}\""),
+            None => kind.to_string(),
+        };
         let Some(layout) = &self.layout else {
-            return format!("{}: settings not recognized ({})", self.kind, self.settings);
+            return format!(
+                "{}: settings not recognized ({})",
+                name(&self.kind),
+                self.settings
+            );
         };
         match layout {
             VspeLayout::Splitter {
@@ -95,18 +112,21 @@ impl VspeDevice {
                 ports,
                 baud,
             } => format!(
-                "Splitter: {source} shared as {}{}",
+                "{}: {source} shared as {}{}",
+                name("Splitter"),
                 join(ports),
                 baud.map(|b| format!(" ({b} baud)")).unwrap_or_default()
             ),
-            VspeLayout::Connector { port } => format!("Connector: {port}"),
-            VspeLayout::Pair { ports } => format!("Pair: {}", ports.join(" ↔ ")),
-            VspeLayout::Redirector { ports } => format!("Redirector: {}", ports.join(" ↔ ")),
+            VspeLayout::Connector { port } => format!("{}: {port}", name("Connector")),
+            VspeLayout::Pair { ports } => format!("{}: {}", name("Pair"), ports.join(" ↔ ")),
+            VspeLayout::Redirector { ports } => {
+                format!("{}: {}", name("Redirector"), ports.join(" ↔ "))
+            }
             VspeLayout::Network {
                 port,
                 protocol,
                 address,
-            } => format!("{protocol}: {port} on {address}"),
+            } => format!("{}: {port} on {address}", name(protocol)),
         }
     }
 }
@@ -163,7 +183,7 @@ fn field_at(bytes: &[u8], at: usize, max: usize) -> Option<(&[u8], usize)> {
 }
 
 /// A device record at `at`: a known device type followed by printable
-/// settings.
+/// settings and, in newer files, the device's name.
 fn record_at(bytes: &[u8], at: usize) -> Option<(VspeDevice, usize)> {
     let (kind, next) = field_at(bytes, at, MAX_KIND_LEN)?;
     if kind.is_empty() || !kind.iter().all(u8::is_ascii_alphanumeric) {
@@ -176,14 +196,46 @@ fn record_at(bytes: &[u8], at: usize) -> Option<(VspeDevice, usize)> {
         return None;
     }
     let settings = String::from_utf8_lossy(settings).into_owned();
+    let (label, next) = match label_at(bytes, next) {
+        Some((label, end)) => (Some(label), end),
+        None => (None, next),
+    };
     Some((
         VspeDevice {
             layout: layout(kind, &settings),
             kind: kind.to_string(),
             settings,
+            label,
         },
         next,
     ))
+}
+
+/// The device name after the settings: a 32-bit zero, then a 32-bit
+/// character count and that many UTF-16LE characters of printable text.
+fn label_at(bytes: &[u8], at: usize) -> Option<(String, usize)> {
+    if u32_at(bytes, at)? != 0 {
+        return None;
+    }
+    let count = u32_at(bytes, at + 4)? as usize;
+    if !(1..=MAX_LABEL_LEN).contains(&count) {
+        return None;
+    }
+    let start = at + 8;
+    let raw = bytes.get(start..start + 2 * count)?;
+    let units = raw
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|u| u16::from_le_bytes(*u));
+    let label = char::decode_utf16(units)
+        .collect::<Result<String, _>>()
+        .ok()?;
+    if label.chars().any(char::is_control) {
+        return None;
+    }
+    let label = label.trim();
+    (!label.is_empty()).then(|| (label.to_string(), start + 2 * count))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -294,38 +346,42 @@ fn layout(kind: &str, settings: &str) -> Option<VspeLayout> {
 }
 
 fn splitter(fields: &[&str]) -> Option<VspeLayout> {
-    match fields.first().copied() {
-        // VSPE 1.5 and later: v2;<source>;<options>;<serial settings>;<count>;<port>;…
-        Some("v2") => {
-            let source = com_port(fields.get(1)?)?;
-            let baud = fields.get(3).and_then(|s| baud(s));
-            let count: usize = fields.get(4)?.trim().parse().ok()?;
-            if !(1..=MAX_SPLITTER_PORTS).contains(&count) {
-                return None;
-            }
-            let rest = fields.get(5..)?;
-            if rest.len() < count || rest.len() % count != 0 {
-                return None;
-            }
-            let per_port = rest.len() / count;
-            let ports = rest
-                .chunks(per_port)
-                .map(|port| com_port(port[0]))
-                .collect::<Option<Vec<_>>>()?;
-            Some(VspeLayout::Splitter {
-                source,
-                ports,
-                baud,
-            })
-        }
-        _ if versioned(fields) => None,
+    if !versioned(fields) {
         // Documented: VirtualComPortIndex;RealComPortIndex;ReadOnly;SerialSettings;…
-        _ => Some(VspeLayout::Splitter {
+        return Some(VspeLayout::Splitter {
             source: com_port(fields.get(1)?)?,
             ports: vec![com_port(fields.first()?)?],
             baud: fields.get(3).and_then(|s| baud(s)),
-        }),
+        });
     }
+    // VSPE 1.5 and later: v2;<source>;<options>;<serial settings>;<count>;<port>;…
+    // with five fields per port, and v3 with nine.
+    let source = com_port(fields.get(1)?)?;
+    let baud = fields.get(3).and_then(|s| baud(s));
+    let count: usize = fields.get(4)?.trim().parse().ok()?;
+    if !(1..=MAX_SPLITTER_PORTS).contains(&count) {
+        return None;
+    }
+    let rest = fields.get(5..)?;
+    if rest.len() < count || rest.len() % count != 0 {
+        return None;
+    }
+    let per_port = rest.len() / count;
+    let ports = rest
+        .chunks(per_port)
+        .map(|port| com_port(port[0]))
+        .collect::<Option<Vec<_>>>()?;
+    // Every virtual port is a different port, and none is the shared one.
+    for (i, port) in ports.iter().enumerate() {
+        if *port == source || ports[..i].contains(port) {
+            return None;
+        }
+    }
+    Some(VspeLayout::Splitter {
+        source,
+        ports,
+        baud,
+    })
 }
 
 #[cfg(test)]
@@ -334,6 +390,9 @@ mod tests {
 
     /// A configuration saved by VSPE 1.5 on a laptop: four Splitters.
     const SPLITTERS: &[u8] = include_bytes!("../tests/data/splitters.vspe");
+    /// The startup configuration of the same laptop saved by a later VSPE:
+    /// `v3` Splitters, one of them with a name.
+    const SPLITTERS_V3: &[u8] = include_bytes!("../tests/data/splitters-v3.vspe");
 
     fn splitter(source: &str, ports: &[&str], baud: u32) -> Option<VspeLayout> {
         Some(VspeLayout::Splitter {
@@ -357,9 +416,32 @@ mod tests {
             ]
         );
         assert!(devices.iter().all(|d| d.kind == "Splitter"));
+        assert!(devices.iter().all(|d| d.label.is_none()));
         assert_eq!(
             devices[1].describe(),
             "Splitter: COM4 shared as COM20, COM21 and COM22 (9600 baud)"
+        );
+    }
+
+    #[test]
+    fn reads_v3_splitters_and_their_names() {
+        let devices = parse_config(SPLITTERS_V3).unwrap();
+        let layouts: Vec<_> = devices.iter().map(|d| d.layout.clone()).collect();
+        assert_eq!(
+            layouts,
+            [
+                splitter("COM5", &["COM8", "COM10"], 9600),
+                splitter("COM4", &["COM20", "COM21", "COM22"], 9600),
+                splitter("COM13", &["COM1", "COM2"], 9600),
+                splitter("COM14", &["COM23", "COM24", "COM25"], 4800),
+                splitter("COM15", &["COM26", "COM28"], 9600),
+            ]
+        );
+        let labels: Vec<_> = devices.iter().map(|d| d.label.as_deref()).collect();
+        assert_eq!(labels, [None, None, None, None, Some("D750 BT Port")]);
+        assert_eq!(
+            devices[4].describe(),
+            "Splitter \"D750 BT Port\": COM15 shared as COM26 and COM28 (9600 baud)"
         );
     }
 
@@ -429,13 +511,58 @@ mod tests {
     #[test]
     fn leaves_unknown_formats_alone() {
         assert_eq!(layout("Connector", "v2;9;0"), None);
-        assert_eq!(layout("Splitter", "v3;5;28;v003,9600;1;8;6;0;;"), None);
         assert_eq!(layout("Bridge", "1;2"), None);
-        // A splitter whose port list does not add up.
-        assert_eq!(layout("Splitter", "v2;5;28;v003,9600;3;8;6;0;;"), None);
+        // Splitters whose port list does not add up.
+        for settings in [
+            "v2;5;28;v003,9600;3;8;6;0;;",
+            "v2;5;28;v003,9600;2;8;x;0;;;y;6;0;;",
+            "v3;5;28;v004,9600;0;",
+            "v3;5;28;v004,9600;9;8;9;10;11;12;13;14;15;16",
+            "v3;5;28;v004,9600;2;8;6;0;0;0;0;0;0;0;8;6;0;0;0;0;0;0;0",
+            "v3;5;28;v004,9600;2;8;6;0;0;0;0;0;0;0;5;6;0;0;0;0;0;0;0",
+            "v3;x;28;v004,9600;1;8;6;0;0;0;0;0;0;0",
+        ] {
+            assert_eq!(layout("Splitter", settings), None, "{settings}");
+        }
         assert_eq!(
-            layout("Splitter", "v2;5;28;v003,9600;2;8;x;0;;;y;6;0;;"),
-            None
+            layout(
+                "Splitter",
+                "v3;15;28;v004,9600,8,0;2;26;6;0;0;0;0;0;0;0;28;6;0;0;0;0;0;0;0"
+            ),
+            splitter("COM15", &["COM26", "COM28"], 9600)
+        );
+    }
+
+    fn label(out: &mut Vec<u8>, text: &str) {
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&(text.encode_utf16().count() as u32).to_le_bytes());
+        for unit in text.encode_utf16() {
+            out.extend_from_slice(&unit.to_le_bytes());
+        }
+        out.extend_from_slice(&0u32.to_le_bytes());
+    }
+
+    #[test]
+    fn reads_device_names() {
+        let mut file = vec![0, 0, 0, 0];
+        file.extend_from_slice(&MAGIC.to_le_bytes());
+        file.extend_from_slice(&[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0]);
+        record(&mut file, "Pair");
+        record(&mut file, "21;22;0");
+        label(&mut file, "FT-991A ↔ N1MM");
+        record(&mut file, "Connector");
+        record(&mut file, "9;0");
+        label(&mut file, "");
+        record(&mut file, "Connector");
+        record(&mut file, "10;0");
+        // Not a name: control characters.
+        label(&mut file, "\u{1}\u{2}");
+        let devices = parse_config(&file).unwrap();
+        let labels: Vec<_> = devices.iter().map(|d| d.label.as_deref()).collect();
+        assert_eq!(labels, [Some("FT-991A ↔ N1MM"), None, None]);
+        assert_eq!(
+            devices[0].describe(),
+            "Pair \"FT-991A ↔ N1MM\": COM21 ↔ COM22"
         );
     }
 
@@ -487,16 +614,18 @@ mod tests {
             parse_config(b"<?xml version=\"1.0\"?>"),
             Err(VspeError::NotVspe)
         );
-        for cut in 0..SPLITTERS.len() {
-            let _ = parse_config(&SPLITTERS[..cut]);
-        }
-        let mut noisy = SPLITTERS.to_vec();
-        for (i, b) in noisy.iter_mut().enumerate().skip(8) {
-            if i % 7 == 0 {
-                *b = b.wrapping_mul(31).wrapping_add(7);
+        for file in [SPLITTERS, SPLITTERS_V3] {
+            for cut in 0..file.len() {
+                let _ = parse_config(&file[..cut]);
             }
+            let mut noisy = file.to_vec();
+            for (i, b) in noisy.iter_mut().enumerate().skip(8) {
+                if i % 7 == 0 {
+                    *b = b.wrapping_mul(31).wrapping_add(7);
+                }
+            }
+            let _ = parse_config(&noisy);
         }
-        let _ = parse_config(&noisy);
         let mut huge = SPLITTERS[..8].to_vec();
         huge.extend_from_slice(&u32::MAX.to_le_bytes());
         assert_eq!(parse_config(&huge), Ok(vec![]));
